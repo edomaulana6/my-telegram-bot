@@ -1,7 +1,9 @@
 import os
-import requests
+import asyncio
 from pyrogram import Client, filters
+from yt_dlp import YoutubeDL
 
+# DATA DARI GITHUB SECRETS
 token = os.environ.get('BOT_TOKEN')
 api_id = os.environ.get('API_ID')
 api_hash = os.environ.get('API_HASH')
@@ -11,43 +13,42 @@ app = Client("downloader_bot", api_id=int(api_id), api_hash=api_hash, bot_token=
 @app.on_message(filters.text & filters.private)
 async def handle_download(client, message):
     url = message.text
-    if not url.startswith("http"): return
+    if not url.startswith("http"):
+        return
 
-    status_msg = await message.reply_text("🔎 Memeriksa Server Pihak Ketiga...")
+    status_msg = await message.reply_text("⏳ Memproses link...")
 
-    # Arsitektur JSON v10 terbaru
-    payload = {
-        "url": url,
-        "videoQuality": "720",
-        "filenameStyle": "basic",
-        "downloadMode": "auto"
-    }
-    
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
+    # Konfigurasi yt-dlp standar
+    ydl_opts = {
+        'format': 'best[ext=mp4]/best',
+        'quiet': True,
+        'no_warnings': True,
+        'outtmpl': f'download_{message.from_user.id}.%(ext)s',
     }
 
     try:
-        # Mencoba server utama
-        response = requests.post("https://api.cobalt.tools/api/json", json=payload, headers=headers)
-        data = response.json()
-
-        # Audit tipe konten yang dikirim balik oleh API
-        if data.get("status") in ["stream", "redirect"]:
-            dl_link = data.get("url")
-            await status_msg.edit_text("📥 Server ditemukan! Mengirim file...")
-            await client.send_video(chat_id=message.chat.id, video=dl_link, caption="✅ Berhasil via API v10")
-            await status_msg.delete()
-        elif data.get("status") == "picker":
-            for item in data.get("picker"):
-                await client.send_photo(chat_id=message.chat.id, photo=item.get("url"))
-            await status_msg.delete()
-        else:
-            await status_msg.edit_text(f"⚠️ Server merespons tapi gagal: {data.get('text', 'Konten tidak didukung')}")
+        with YoutubeDL(ydl_opts) as ydl:
+            # Audit apakah platform didukung
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
             
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Gangguan Jalur: Pihak ketiga sedang down atau memblokir koneksi.")
+            await status_msg.edit_text("📤 Mengirim file...")
+            await client.send_video(chat_id=message.chat.id, video=filename, caption=info.get('title'))
+            
+            if os.path.exists(filename):
+                os.remove(filename)
+            await status_msg.delete()
 
-print("Bot Pihak Ketiga v10 Siap...")
+    except Exception as e:
+        error_msg = str(e)
+        # Logika jawaban jika platform tidak didukung atau diblokir
+        if "Unsupported URL" in error_msg:
+            await status_msg.edit_text(f"❌ Platform ini tidak didukung.")
+        elif "Sign in to confirm your age" in error_msg or "Inappropriate content" in error_msg:
+            await status_msg.edit_text(f"❌ Konten ini dibatasi atau butuh cookies.")
+        else:
+            await status_msg.edit_text(f"❌ Gagal: YouTube/Platform ini tidak didukung tanpa cookies.")
+
+print("Bot yt-dlp Lokal Aktif...")
 app.run()
+    
