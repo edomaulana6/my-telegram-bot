@@ -16,9 +16,9 @@ async def handle_download(client, message):
     if not url.startswith("http"):
         return
 
-    status_msg = await message.reply_text("⏳ Memproses link...")
+    status_msg = await message.reply_text("⏳ Memproses link via yt-dlp...")
 
-    # Konfigurasi yt-dlp standar
+    # Konfigurasi yt-dlp lokal
     ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'quiet': True,
@@ -28,11 +28,11 @@ async def handle_download(client, message):
 
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            # Audit apakah platform didukung
+            # Mengunduh secara lokal di server GitHub
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
-            await status_msg.edit_text("📤 Mengirim file...")
+            await status_msg.edit_text("📤 Mengirim file ke Telegram...")
             await client.send_video(chat_id=message.chat.id, video=filename, caption=info.get('title'))
             
             if os.path.exists(filename):
@@ -40,15 +40,13 @@ async def handle_download(client, message):
             await status_msg.delete()
 
     except Exception as e:
-        error_msg = str(e)
-        # Logika jawaban jika platform tidak didukung atau diblokir
-        if "Unsupported URL" in error_msg:
-            await status_msg.edit_text(f"❌ Platform ini tidak didukung.")
-        elif "Sign in to confirm your age" in error_msg or "Inappropriate content" in error_msg:
-            await status_msg.edit_text(f"❌ Konten ini dibatasi atau butuh cookies.")
+        error_text = str(e)
+        # Jawaban jujur jika platform tidak tembus
+        if "Unsupported URL" in error_text:
+            await status_msg.edit_text("❌ Platform ini tidak didukung oleh bot.")
         else:
-            await status_msg.edit_text(f"❌ Gagal: YouTube/Platform ini tidak didukung tanpa cookies.")
+            await status_msg.edit_text("❌ Gagal: Platform ini tidak didukung (butuh akses khusus/cookies).")
 
-print("Bot yt-dlp Lokal Aktif...")
+print("Bot yt-dlp Standar Aktif...")
 app.run()
-    
+            
