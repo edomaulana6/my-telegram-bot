@@ -2,7 +2,6 @@ import os
 import requests
 from pyrogram import Client, filters
 
-# DATA DARI GITHUB SECRETS
 token = os.environ.get('BOT_TOKEN')
 api_id = os.environ.get('API_ID')
 api_hash = os.environ.get('API_HASH')
@@ -12,16 +11,16 @@ app = Client("downloader_bot", api_id=int(api_id), api_hash=api_hash, bot_token=
 @app.on_message(filters.text & filters.private)
 async def handle_download(client, message):
     url = message.text
-    if not url.startswith("http"):
-        return await message.reply_text("Silakan kirim link video yang valid.")
+    if not url.startswith("http"): return
 
-    status = await message.reply_text("🚀 Sedang memproses via Jalur Pihak Ketiga...")
+    status_msg = await message.reply_text("🔎 Memeriksa Server Pihak Ketiga...")
 
-    # MENGGUNAKAN COBALT API (PIHAK KETIGA)
+    # Arsitektur JSON v10 terbaru
     payload = {
         "url": url,
-        "vQuality": "720", # Kualitas standar agar cepat
-        "isAudioOnly": False
+        "videoQuality": "720",
+        "filenameStyle": "basic",
+        "downloadMode": "auto"
     }
     
     headers = {
@@ -30,25 +29,25 @@ async def handle_download(client, message):
     }
 
     try:
-        # Kita meminta bantuan server 'api.cobalt.tools'
+        # Mencoba server utama
         response = requests.post("https://api.cobalt.tools/api/json", json=payload, headers=headers)
         data = response.json()
 
-        if data.get("status") == "stream":
-            video_url = data.get("url")
-            await client.send_video(chat_id=message.chat.id, video=video_url, caption="✅ Berhasil via Pihak Ketiga")
-            await status.delete()
+        # Audit tipe konten yang dikirim balik oleh API
+        if data.get("status") in ["stream", "redirect"]:
+            dl_link = data.get("url")
+            await status_msg.edit_text("📥 Server ditemukan! Mengirim file...")
+            await client.send_video(chat_id=message.chat.id, video=dl_link, caption="✅ Berhasil via API v10")
+            await status_msg.delete()
         elif data.get("status") == "picker":
-            # Untuk TikTok Slide (Banyak Foto)
             for item in data.get("picker"):
                 await client.send_photo(chat_id=message.chat.id, photo=item.get("url"))
-            await status.delete()
+            await status_msg.delete()
         else:
-            await status.edit_text(f"❌ Pihak ketiga gagal: {data.get('text', 'Kesalahan tidak diketahui')}")
+            await status_msg.edit_text(f"⚠️ Server merespons tapi gagal: {data.get('text', 'Konten tidak didukung')}")
             
     except Exception as e:
-        await status.edit_text(f"❌ Gangguan koneksi: {str(e)}")
+        await status_msg.edit_text(f"❌ Gangguan Jalur: Pihak ketiga sedang down atau memblokir koneksi.")
 
-print("Bot Jalur Pihak Ketiga Aktif (Bebas Cookies)...")
+print("Bot Pihak Ketiga v10 Siap...")
 app.run()
-    
