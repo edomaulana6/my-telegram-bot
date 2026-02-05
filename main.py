@@ -8,19 +8,23 @@ token = os.environ.get('BOT_TOKEN')
 api_id = os.environ.get('API_ID')
 api_hash = os.environ.get('API_HASH')
 
+# Validasi awal agar tidak Exit Code 1 karena data kosong
+if not all([token, api_id, api_hash]):
+    print("Error: Secrets BOT_TOKEN, API_ID, atau API_HASH belum diisi!")
+    exit(1)
+
 app = Client("downloader_bot", api_id=int(api_id), api_hash=api_hash, bot_token=token)
 
-# Variabel sementara untuk menyimpan siapa yang sedang ditanya link
+# Database sementara
 waiting_for_link = {}
 
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    await message.reply_text("Halo! Ketik /dl untuk mulai mengunduh video.")
+    await message.reply_text("Halo! Ketik /dl untuk mulai.")
 
 @app.on_message(filters.command("dl") & filters.private)
 async def ask_for_link(client, message):
     user_id = message.from_user.id
-    # Tandai user ini sedang ditunggu link-nya
     waiting_for_link[user_id] = True
     await message.reply_text("Mana link-nya?")
 
@@ -28,22 +32,19 @@ async def ask_for_link(client, message):
 async def handle_text(client, message):
     user_id = message.from_user.id
     
-    # Cek apakah user ini baru saja mengetik /dl
     if waiting_for_link.get(user_id):
         url = message.text
-        
-        # Validasi link
         if not url.startswith("http"):
-            return await message.reply_text("Itu bukan link. Coba kirim link yang benar atau ketik /dl lagi.")
-        
-        # Hapus tanda tunggu agar tidak terjadi loop download
+            await message.reply_text("Itu bukan link. Ketik /dl lagi ya.")
+            waiting_for_link[user_id] = False
+            return
+
         waiting_for_link[user_id] = False
-        
-        waiting_msg = await message.reply_text("Siap, sedang memproses link tersebut... Mohon tunggu.")
+        waiting_msg = await message.reply_text("Memproses... mohon tunggu.")
         
         ydl_opts = {
             'format': 'best',
-            'outtmpl': 'downloaded_video.%(ext)s',
+            'outtmpl': 'video_%(id)s.%(ext)s',
             'quiet': True,
         }
 
@@ -51,19 +52,13 @@ async def handle_text(client, message):
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
-                
-            await waiting_msg.edit_text("Download selesai, sedang mengirim file...")
-            await message.reply_video(video=filename, caption=f"✅ **Berhasil:** {info.get('title')}")
             
-            # Hapus file dari server Microsoft
+            await message.reply_video(video=filename, caption=f"Selesai: {info.get('title')}")
             if os.path.exists(filename):
                 os.remove(filename)
-                
+            await waiting_msg.delete()
         except Exception as e:
-            await waiting_msg.edit_text(f"Gagal mengunduh. Error: {str(e)}")
-    
-    # Jika user kirim teks biasa tanpa /dl, bot diam saja atau beri instruksi lain
+            await message.reply_text(f"Gagal: {str(e)}")
 
-print("Bot Downloader (Mode Percakapan) Aktif...")
+print("Bot Aktif...")
 app.run()
-                
