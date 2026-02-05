@@ -4,30 +4,27 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from yt_dlp import YoutubeDL
 
-# AMBIL DATA DARI SECRETS GITHUB
+# DATA DARI GITHUB SECRETS
 token = os.environ.get('BOT_TOKEN')
 api_id = os.environ.get('API_ID')
 api_hash = os.environ.get('API_HASH')
 
-# Validasi awal agar tidak Exit Code 1
 if not all([token, api_id, api_hash]):
-    print("Error: Secrets BOT_TOKEN, API_ID, atau API_HASH belum diisi!")
+    print("Error: Pastikan BOT_TOKEN, API_ID, dan API_HASH sudah diisi di Secrets!")
     exit(1)
 
 app = Client("downloader_bot", api_id=int(api_id), api_hash=api_hash, bot_token=token)
-
-# Database sementara untuk status user
 user_data = {}
 
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    await message.reply_text(f"Halo {message.from_user.first_name}! 👋\nKetik /dl untuk mulai download.")
+    await message.reply_text("Halo! Ketik /dl untuk mulai.")
 
 @app.on_message(filters.command("dl") & filters.private)
 async def ask_for_link(client, message):
     user_id = message.from_user.id
     user_data[user_id] = {'waiting': True}
-    await message.reply_text("Mana link-nya? (Dukung YouTube, TikTok Foto/Video, IG, dll)")
+    await message.reply_text("Mana link-nya?")
 
 @app.on_message(filters.text & filters.private)
 async def handle_text(client, message):
@@ -35,16 +32,14 @@ async def handle_text(client, message):
     if user_data.get(user_id, {}).get('waiting'):
         url = message.text
         if not url.startswith("http"):
-            return await message.reply_text("Kirim link yang valid ya!")
+            return await message.reply_text("Kirim link yang valid!")
         
         user_data[user_id] = {'url': url, 'waiting': False}
-        
-        # Pilihan Format
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎥 Video", callback_data="vid"),
              InlineKeyboardButton("🎵 Audio", callback_data="aud")]
         ])
-        await message.reply_text("Pilih format unduhan:", reply_markup=buttons)
+        await message.reply_text("Pilih format:", reply_markup=buttons)
 
 @app.on_callback_query()
 async def process_download(client, callback_query):
@@ -53,9 +48,9 @@ async def process_download(client, callback_query):
     url = user_data.get(user_id, {}).get('url')
 
     if not url:
-        return await callback_query.answer("Link hilang, ulangi /dl", show_alert=True)
+        return await callback_query.answer("Link hilang, ulangi /dl")
 
-    await callback_query.message.edit_text("⏳ Sedang memproses... Mohon tunggu.")
+    await callback_query.message.edit_text("⏳ Sedang memproses...")
     
     ydl_opts = {
         'quiet': True,
@@ -74,30 +69,26 @@ async def process_download(client, callback_query):
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-
-            # Fitur Foto TikTok (Slide)
-            if 'entries' in info or info.get('ext') in ['jpg', 'png', 'webp']:
-                await callback_query.message.edit_text("Mendeteksi foto, mengirim sebagai media...")
+            
+            # Cek jika ini adalah foto/slide (TikTok)
+            if info.get('ext') in ['jpg', 'png', 'webp'] or 'entries' in info:
                 if 'entries' in info:
                     for entry in info['entries']:
                         await client.send_photo(chat_id=user_id, photo=entry['url'])
                 else:
                     await client.send_photo(chat_id=user_id, photo=url)
-                await callback_query.message.delete()
-                return
-
-        # Kirim Video atau Audio
-        if data == "vid":
-            await client.send_video(chat_id=user_id, video=filename, caption=f"✅ {info.get('title')}")
-        else:
-            await client.send_audio(chat_id=user_id, audio=filename, caption=f"✅ {info.get('title')}")
-        
-        if os.path.exists(filename):
-            os.remove(filename)
+            else:
+                if data == "vid":
+                    await client.send_video(chat_id=user_id, video=filename, caption=info.get('title'))
+                else:
+                    await client.send_audio(chat_id=user_id, audio=filename, caption=info.get('title'))
+            
+            if os.path.exists(filename):
+                os.remove(filename)
         await callback_query.message.delete()
-        
     except Exception as e:
         await callback_query.message.edit_text(f"❌ Gagal: {str(e)}")
 
-print("Bot Multi-Downloader (TikTok Photo Support) Aktif...")
+print("Bot Aktif...")
 app.run()
+                
