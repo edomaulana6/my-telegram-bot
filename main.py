@@ -9,7 +9,7 @@ from threading import Thread
 PROXY = {
     "scheme": "socks5",
     "hostname": "185.31.41.85",
-    "port": 9090
+    "port": 8080
 }
 
 # --- ANTI-MATI KOYEB (PORT DINAMIS) ---
