@@ -5,22 +5,16 @@ from yt_dlp import YoutubeDL
 from flask import Flask
 from threading import Thread
 
-# --- PERBAIKAN 1: KONFIGURASI PROXY ---
-PROXY = {
-    "scheme": "socks5",
-    "hostname": "185.31.41.85",
-    "port": 8080
-}
-
 # --- ANTI-MATI KOYEB (PORT DINAMIS) ---
 app_web = Flask('')
 
 @app_web.route('/')
 def home(): 
+    # Status Healthy agar Koyeb tidak mematikan instance
     return "Bot 50 Fitur Aktif - Status: Healthy"
 
 def run_web():
-    # Mengambil port secara otomatis dari sistem Koyeb (default 8000 jika lokal)
+    # Mengambil port dari environment variabel Koyeb
     port = int(os.environ.get("PORT", 8000))
     app_web.run(host='0.0.0.0', port=port)
 
@@ -29,12 +23,12 @@ api_id = int(os.environ.get("API_ID"))
 api_hash = os.environ.get("API_HASH")
 token = os.environ.get("BOT_TOKEN")
 
+# AUDIT: Proxy dihapus karena VPS sumber tidak memiliki koneksi internet (AF_INET error)
 app = Client(
     "ultimate_50_bot", 
     api_id=api_id, 
     api_hash=api_hash, 
-    bot_token=token,
-    proxy=PROXY
+    bot_token=token
 )
 
 search_db = {}
@@ -107,7 +101,7 @@ async def short(c, m): await m.reply(f"🔗 Link Shorted!")
 async def pw(c, m): await m.reply(f"🔑 Pass: `{''.join(random.sample(string.ascii_letters + string.digits, 12))}`")
 
 @app.on_message(filters.command("speed"))
-async def speed(c, m): await m.reply("🚀 Server Speed: 100Gbps (Proxy Stable)")
+async def speed(c, m): await m.reply("🚀 Server Speed: 100Gbps (Direct Connection)")
 
 @app.on_callback_query()
 async def cb_handler(c, cb):
@@ -123,8 +117,7 @@ async def cb_handler(c, cb):
         await c.send_document(cb.message.chat.id, search_db[uid]["res"][int(cb.data.split("_")[1])])
 
 if __name__ == "__main__":
-    # Menjalankan Flask di Thread terpisah
+    # Jalankan web server untuk Health Check Koyeb
     Thread(target=run_web).start()
-    print("50 Fitur Aktif - Menunggu Health Check...")
+    print("Bot Aktif Tanpa Proxy - Menjalankan Koneksi Langsung...")
     app.run()
-    
