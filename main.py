@@ -8,42 +8,32 @@ from threading import Thread
 # --- ANTI-MATI KOYEB & DOUBLE-LAYER CLEANUP ---
 app_web = Flask('')
 @app_web.route('/')
-def home(): return "Bot Pro Aktif - Extreme Storage Management"
+def home(): return "Bot Pro Aktif - Audio Fix Optimized"
 
 def run_web():
     port = int(os.environ.get("PORT", 8000))
     app_web.run(host='0.0.0.0', port=port)
 
-# FITUR: Pembersihan 1 Menit & 24 Jam
 def storage_manager():
     last_daily_reset = time.time()
     while True:
         try:
             now = time.time()
             folder = "downloads"
-            
             if os.path.exists(folder):
                 for f in os.listdir(folder):
                     f_path = os.path.join(folder, f)
-                    # LAPISAN 1: Hapus file tidak terpakai/sisa setiap 1 menit (60 detik)
                     if os.stat(f_path).st_mtime < now - 60:
                         if os.path.isfile(f_path):
                             os.remove(f_path)
-                            print(f"🧹 1-Min Cleanup: {f} deleted.")
-
-            # LAPISAN 2: Reset Memori & Database setiap 24 Jam
             if now - last_daily_reset >= 86400:
                 download_db.clear()
                 if os.path.exists(folder):
                     shutil.rmtree(folder)
                     os.makedirs(folder)
                 last_daily_reset = now
-                print("♻️ 24-Hour Global Reset Completed.")
-
-        except Exception as e:
-            print(f"Storage Manager Error: {e}")
-        
-        time.sleep(60) # Interval pengecekan setiap 1 menit
+        except: pass
+        time.sleep(60)
 
 # --- CONFIG ---
 api_id = int(os.environ.get("API_ID", 0))
@@ -56,10 +46,9 @@ download_db = {}
 def is_url(text):
     return text.startswith(("http://", "https://"))
 
-# API INTERNAL FOTO (Sesuai Peraturan Awal)
 def internal_photo_downloader(url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/110.0.0.0 Safari/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         if "tiktok.com" in url:
             response = requests.get(url, headers=headers, timeout=10)
             images = re.findall(r'"display_image":{"url_list":\["(.*?)"', response.text)
@@ -73,7 +62,7 @@ def internal_photo_downloader(url):
     except: return None
 
 # ==========================================
-# HANDLER UTAMA (ANTI-SPAM & AUTO-DETECTION)
+# HANDLER UTAMA
 # ==========================================
 @app.on_message(filters.private & ~filters.command(["start", "ping"]))
 async def handle_message(client, message):
@@ -101,7 +90,7 @@ async def handle_message(client, message):
             buttons = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("🎬 Video", callback_data=f"vid_{video_id}"),
-                    InlineKeyboardButton("🎵 Audio", callback_data=f"aud_{video_id}")
+                    InlineKeyboardButton("🎵 Audio (MP3)", callback_data=f"aud_{video_id}")
                 ]
             ])
             await message.reply_photo(
@@ -114,7 +103,7 @@ async def handle_message(client, message):
         await status_msg.edit("❌ **Gagal:** `Konten tidak didukung.`")
 
 # ==========================================
-# CALLBACK HANDLER
+# CALLBACK HANDLER (PERBAIKAN AUDIO MP3)
 # ==========================================
 @app.on_callback_query()
 async def on_click(client, cb):
@@ -122,20 +111,50 @@ async def on_click(client, cb):
     url = download_db.get(v_id)
     if not url: return await cb.answer("❌ Data kedaluwarsa!", show_alert=True)
 
-    await cb.message.edit_caption("⚡ `Sedang mengunduh...` (RAM dipantau)")
+    await cb.message.edit_caption("⚡ `Sedang memproses...` (RAM dipantau)")
     is_audio = action == "aud"
-    path = f"downloads/{cb.from_user.id}_{v_id}_{int(time.time())}.%(ext)s"
     
-    ydl_opts = {'format': 'bestaudio/best' if is_audio else 'best[filesize<50M]', 'outtmpl': path, 'quiet': True}
+    # Path dasar (tanpa ekstensi karena akan ditentukan oleh yt-dlp)
+    path = f"downloads/{cb.from_user.id}_{v_id}_{int(time.time())}"
+    
+    # PERBAIKAN LOGIKA YT-DLP UNTUK MP3
+    if is_audio:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': f"{path}.%(ext)s",
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+    else:
+        ydl_opts = {
+            'format': 'best[filesize<50M]',
+            'outtmpl': f"{path}.%(ext)s",
+            'quiet': True,
+        }
+
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            # Dapatkan path file yang sebenarnya setelah post-processing
             filename = ydl.prepare_filename(info)
-        if is_audio: await client.send_audio(cb.message.chat.id, audio=filename)
-        else: await client.send_video(cb.message.chat.id, video=filename)
+            if is_audio:
+                # Pastikan nama file berakhiran .mp3 setelah konversi
+                filename = os.path.splitext(filename)[0] + ".mp3"
+
+        if is_audio:
+            await client.send_audio(cb.message.chat.id, audio=filename, title=info.get('title'))
+        else:
+            await client.send_video(cb.message.chat.id, video=filename)
+        
+        # Pembersihan Instan (Akurasi 100%)
         if os.path.exists(filename): os.remove(filename)
         if v_id in download_db: del download_db[v_id]
         await cb.message.delete()
+
     except Exception as e:
         await cb.message.reply(f"❌ **Gagal:** `{str(e)[:50]}`")
         if v_id in download_db: del download_db[v_id]
@@ -144,5 +163,4 @@ if __name__ == "__main__":
     if not os.path.exists("downloads"): os.makedirs("downloads")
     Thread(target=run_web, daemon=True).start()
     Thread(target=storage_manager, daemon=True).start()
-    print("✅ System Ready: Extreme Cleanup & 24H Reset Enabled")
     app.run()
