@@ -21,6 +21,7 @@ token = os.environ.get("BOT_TOKEN", "")
 
 app = Client("dl_pro", api_id=api_id, api_hash=api_hash, bot_token=token, ipv6=False)
 
+# Database sementara
 download_db = {}
 
 def is_url(text):
@@ -32,15 +33,18 @@ def is_url(text):
 @app.on_message(filters.private & ~filters.command(["start", "ping"]))
 async def handle_message(client, message):
     url = message.text
-    if not is_url(url): return 
+    
+    # Peraturan 1: Bedakan link dan pesan biasa (Anti-Spam)
+    if not is_url(url): 
+        return 
 
     status_msg = await message.reply("🔍 `Menganalisis konten...`")
     
-    # Pengaturan agar yt-dlp lebih fleksibel terhadap foto/playlist
+    # Konfigurasi Akurat: extract_flat=False agar bisa membaca redirect TikTok
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': 'in_playlist',  # Penting untuk mendeteksi banyak foto
+        'extract_flat': False, 
         'skip_download': True,
     }
 
@@ -48,30 +52,31 @@ async def handle_message(client, message):
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # --- LOGIKA FOTO / ALBUM ---
-            # Menampung URL gambar yang ditemukan
+            # --- LOGIKA DETEKSI FOTO / ALBUM (TikTok Slide/IG) ---
             image_list = []
             
-            # Cek jika ini adalah album (misal Instagram Slide)
+            # Cek jika ada entries (Album/Slide)
             if 'entries' in info:
-                image_list = [e.get('url') for e in info['entries'] if e.get('url') and any(x in e.get('url', '').lower() for x in ['.jpg', '.png', '.jpeg', '.webp'])]
+                for entry in info['entries']:
+                    if entry.get('url'):
+                        image_list.append(entry.get('url'))
             
-            # Cek jika info dasar mengandung gambar tunggal
-            if not image_list and info.get('url') and any(x in info.get('url', '').lower() for x in ['.jpg', '.png', '.jpeg', '.webp']):
-                image_list = [info.get('url')]
+            # Cek jika info dasar adalah foto tunggal
+            elif info.get('url') and any(x in info.get('url', '').lower() for x in ['.jpg', '.jpeg', '.png', '.webp']):
+                image_list.append(info.get('url'))
 
-            # Jika terdeteksi sebagai foto
+            # Peraturan 2: Jika foto banyak kirim album, jika satu kirim tunggal
             if image_list:
                 await status_msg.delete()
                 if len(image_list) == 1:
                     await message.reply_photo(photo=image_list[0], caption="✅ **Foto Berhasil Diunduh**")
                 else:
-                    # Kirim maksimal 10 foto agar tidak kena spam limit Telegram
+                    # Ambil maksimal 10 agar tidak overload
                     media_group = [InputMediaPhoto(img) for img in image_list[:10]]
                     await message.reply_media_group(media=media_group)
                 return
 
-            # --- LOGIKA VIDEO (Jika bukan foto) ---
+            # --- LOGIKA VIDEO (Tetap seperti struktur asli) ---
             video_id = info.get('id')
             download_db[video_id] = url
             
@@ -82,9 +87,7 @@ async def handle_message(client, message):
                 ]
             ])
 
-            # Gunakan thumbnail yang ada atau gambar placeholder jika tidak ada
             thumb = info.get('thumbnail') or "https://via.placeholder.com/300"
-            
             await message.reply_photo(
                 photo=thumb, 
                 caption=f"📝 **Judul:** `{info.get('title', 'Video Content')}`\n⏱️ **Durasi:** `{time.strftime('%M:%S', time.gmtime(info.get('duration', 0)))}`", 
@@ -93,38 +96,53 @@ async def handle_message(client, message):
             await status_msg.delete()
 
     except Exception as e:
-        # Jika gagal di yt-dlp, kita coba cek manual apakah ini link gambar langsung
+        # Fallback jika yt-dlp gagal mendeteksi link gambar secara otomatis
         if any(url.lower().endswith(x) for x in ['.jpg', '.jpeg', '.png', '.webp']):
             try:
                 await message.reply_photo(photo=url, caption="✅ **Foto (Direct Link)**")
-                await status_msg.delete()
-                return
+                return await status_msg.delete()
             except: pass
         
         await status_msg.edit(f"❌ **Gagal:** `Link tidak didukung atau privat.`")
 
 # ==========================================
-# CALLBACK HANDLER (TETAP SAMA)
+# CALLBACK HANDLER (TETAP SAMA - 100% AMAN)
 # ==========================================
 @app.on_callback_query()
 async def on_click(client, cb):
-    # Logika Callback Anda tetap sama (Tidak ada perubahan di sini)
     action, v_id = cb.data.split("_")
     url = download_db.get(v_id)
-    if not url: return await cb.answer("❌ Data kedaluwarsa!", show_alert=True)
+    
+    if not url:
+        return await cb.answer("❌ Data kedaluwarsa!", show_alert=True)
+
     await cb.message.edit_caption("⚡ `Sedang mengunduh...` (RAM dipantau)")
+    
     is_audio = action == "aud"
+    # Menggunakan User ID agar file 100% tidak tertukar saat download bareng
     path = f"downloads/{cb.from_user.id}_{v_id}_{int(time.time())}.%(ext)s"
-    ydl_opts = {'format': 'bestaudio/best' if is_audio else 'best[filesize<50M]', 'outtmpl': path, 'quiet': True}
+    
+    ydl_opts = {
+        'format': 'bestaudio/best' if is_audio else 'best[filesize<50M]',
+        'outtmpl': path,
+        'quiet': True,
+    }
+
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-        if is_audio: await client.send_audio(cb.message.chat.id, audio=filename)
-        else: await client.send_video(cb.message.chat.id, video=filename)
+
+        if is_audio:
+            await client.send_audio(cb.message.chat.id, audio=filename)
+        else:
+            await client.send_video(cb.message.chat.id, video=filename)
+        
+        # Pembersihan Disk & RAM
         if os.path.exists(filename): os.remove(filename)
         if v_id in download_db: del download_db[v_id]
         await cb.message.delete()
+
     except Exception as e:
         await cb.message.reply(f"❌ **Gagal:** `{str(e)[:50]}`")
         if v_id in download_db: del download_db[v_id]
