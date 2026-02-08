@@ -1,19 +1,16 @@
 {
-  "name": "my-telegram-bot",
-  "version": "1.0.0",
-  "description": "Bot Downloader Media Otomatis",
+  "name": "universal-downloader-bot",
+  "version": "1.1.0",
+  "description": "Bot Downloader All Platform Kualitas Tinggi",
   "main": "index.js",
   "dependencies": {
     "telegraf": "^4.16.3",
-    "axios": "^1.6.7",
-    "@distube/ytdl-core": "latest",
-    "fluent-ffmpeg": "^2.1.2",
     "path": "^0.12.7"
   },
   "scripts": {
     "start": "node index.js"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }
