@@ -1,118 +1,99 @@
-import os, asyncio, requests, time
-from pyrogram import Client, filters, types
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from yt_dlp import YoutubeDL
-from flask import Flask
-from threading import Thread
+const { Telegraf } = require('telegraf');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const ytdl = require('ytdl-core');
+const ffmpeg = require('fluent-ffmpeg');
+const http = require('http');
 
-# --- ANTI-MATI KOYEB ---
-app_web = Flask('')
-@app_web.route('/')
-def home(): return "Bot Pro Aktif - RAM Optimized"
+const API_ID = 'YOUR_API_ID';
+const API_HASH = 'YOUR_API_HASH';
+const BOT_TOKEN = 'YOUR_BOT_TOKEN';
 
-def run_web():
-    port = int(os.environ.get("PORT", 8000))
-    app_web.run(host='0.0.0.0', port=port)
+const bot = new Telegraf(BOT_TOKEN);
+const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/;
 
-# --- CONFIG ---
-api_id = int(os.environ.get("API_ID", 0))
-api_hash = os.environ.get("API_HASH", "")
-token = os.environ.get("BOT_TOKEN", "")
-
-app = Client("dl_pro", api_id=api_id, api_hash=api_hash, bot_token=token, ipv6=False)
-
-# Database sementara
-download_db = {}
-
-def is_url(text):
-    return text.startswith(("http://", "https://"))
-
-# ==========================================
-# HANDLER UTAMA
-# ==========================================
-@app.on_message(filters.private & ~filters.command(["start", "ping"]))
-async def handle_message(client, message):
-    url = message.text
-    if not is_url(url):
-        return await message.reply("👋 Kirimkan **Link Video** untuk mendownload.")
-
-    status_msg = await message.reply("🔍 `Menganalisis link...`")
-    
-    try:
-        # PROTEKSI RAM: Batasi data yang masuk ke RAM
-        with YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            video_id = info.get('id')
-            
-            # Simpan hanya yang diperlukan
-            download_db[video_id] = url
-
-            buttons = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🎬 Video", callback_data=f"vid_{video_id}"),
-                    InlineKeyboardButton("🎵 Audio", callback_data=f"aud_{video_id}")
-                ]
-            ])
-
-            await message.reply_photo(
-                photo=info.get('thumbnail'), 
-                caption=f"📝 **Judul:** `{info.get('title')}`\n⏱️ **Durasi:** `{time.strftime('%M:%S', time.gmtime(info.get('duration', 0)))}`", 
-                reply_markup=buttons
-            )
-            await status_msg.delete()
-
-    except Exception as e:
-        await status_msg.edit(f"❌ **Gagal:** `{str(e)[:40]}`")
-
-# ==========================================
-# CALLBACK HANDLER DENGAN AUTO-CLEAR
-# ==========================================
-@app.on_callback_query()
-async def on_click(client, cb):
-    action, v_id = cb.data.split("_")
-    url = download_db.get(v_id) # Ambil data
-    
-    if not url:
-        return await cb.answer("❌ Data kedaluwarsa!", show_alert=True)
-
-    await cb.message.edit_caption("⚡ `Sedang mengunduh...` (RAM dipantau)")
-    
-    is_audio = action == "aud"
-    path = f"downloads/{v_id}_{int(time.time())}.%(ext)s"
-    
-    ydl_opts = {
-        'format': 'bestaudio/best' if is_audio else 'best[filesize<50M]', # PROTEKSI: Maks 50MB
-        'outtmpl': path,
-        'quiet': True,
+const clearMemoryTotal = () => {
+    const tempDir = path.join(__dirname, 'temp');
+    if (fs.existsSync(tempDir)) {
+        fs.readdirSync(tempDir).forEach(file => {
+            try { fs.unlinkSync(path.join(tempDir, file)); } catch (e) {}
+        });
     }
+    if (global.gc) { global.gc(); }
+};
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
+setInterval(clearMemoryTotal, 24 * 60 * 60 * 1000);
 
-        # Kirim File
-        if is_audio:
-            await client.send_audio(cb.message.chat.id, audio=filename)
-        else:
-            await client.send_video(cb.message.chat.id, video=filename)
-        
-        # --- FITUR AUTO-CLEAR (AKURASI 100%) ---
-        if os.path.exists(filename): 
-            os.remove(filename) # Hapus file fisik
-        
-        if v_id in download_db:
-            del download_db[v_id] # Hapus data dari RAM (Database)
-            
-        await cb.message.delete()
-        print(f"✅ RAM Cleared for ID: {v_id}") # Laporan di log
+const MyMediaAPI = {
+    async getUltraAudio(url) {
+        const outputPath = path.join(__dirname, 'temp', `audio_${Date.now()}.mp3`);
+        return new Promise((resolve, reject) => {
+            ffmpeg(ytdl(url, { quality: 'highestaudio', highWaterMark: 1 << 14 }))
+                .audioBitrate(320)
+                .toFormat('mp3')
+                .save(outputPath)
+                .on('end', () => resolve(outputPath))
+                .on('error', reject);
+        });
+    },
+    async getUltraVideo(url) {
+        const outputPath = path.join(__dirname, 'temp', `video_${Date.now()}.mp4`);
+        return new Promise((resolve, reject) => {
+            const stream = ytdl(url, { quality: 'highestvideo', highWaterMark: 1 << 14 });
+            const writer = fs.createWriteStream(outputPath);
+            stream.pipe(writer);
+            writer.on('finish', () => resolve(outputPath));
+            writer.on('error', reject);
+        });
+    }
+};
 
-    except Exception as e:
-        await cb.message.reply(f"❌ **Gagal:** `{str(e)[:50]}`")
-        # Tetap hapus data jika gagal agar tidak menumpuk
-        if v_id in download_db: del download_db[v_id]
+bot.on('message', async (ctx) => {
+    const text = ctx.message.text;
+    if (!text) return;
+    const match = text.match(urlRegex);
+    
+    if (match) {
+        const targetUrl = match[0];
+        try {
+            const info = await ytdl.getInfo(targetUrl);
+            const title = info.videoDetails.title;
+            const thumb = info.videoDetails.thumbnails.pop().url;
 
-if __name__ == "__main__":
-    if not os.path.exists("downloads"): os.makedirs("downloads")
-    Thread(target=run_web, daemon=True).start()
-    app.run()
+            await ctx.replyWithPhoto(thumb, {
+                caption: `📝 *INFORMASI MEDIA*\n━━━━━━━━━━━━━━\n📌 *Judul:* ${title}\n🔊 *Audio:* 320kbps (Ultra HD)\n📺 *Video:* 1080p/Ultra HD\n⚙️ *Status:* Memproses data...\n━━━━━━━━━━━━━━`,
+                parse_mode: 'Markdown'
+            });
+
+            const audioPath = await MyMediaAPI.getUltraAudio(targetUrl);
+            await ctx.replyWithAudio({ source: audioPath });
+            if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+
+            const videoPath = await MyMediaAPI.getUltraVideo(targetUrl);
+            await ctx.replyWithVideo({ source: videoPath });
+            if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
+
+            if (global.gc) global.gc();
+        } catch (error) {
+            console.error(error);
+        }
+    } else {
+        const rawText = text.toLowerCase().replace('rb', '000').replace(',', '');
+        try {
+            const result = eval(rawText);
+            if (typeof result === 'number') {
+                ctx.reply(`Hasil Perhitungan: ${result}`);
+            }
+        } catch (e) {}
+    }
+});
+
+if (!fs.existsSync('./temp')) fs.mkdirSync('./temp');
+
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Bot Running');
+}).listen(process.env.PORT || 8080);
+
+bot.launch();
