@@ -4,7 +4,7 @@
   "description": "Bot Downloader Luna",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "yt-dlp -U && node index.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
