@@ -8,21 +8,30 @@ const http = require('http');
 const BOT_TOKEN = (process.env.BOT_TOKEN || "TOKEN_SENSITIVE_DI_SINI").trim();
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 180000 });
 
-// --- SILENT PERMISSION CHECK ---
 const ffmpegPath = path.join(process.cwd(), 'ffmpeg');
 const ytdlpPath = path.join(process.cwd(), 'yt-dlp');
 
-try {
-    if (fs.existsSync(ytdlpPath)) execSync(`chmod +x ${ytdlpPath}`);
-    if (fs.existsSync(ffmpegPath)) execSync(`chmod +x ${ffmpegPath}`);
-    console.log("✅ Engine Guard: Permissions Synced.");
-} catch (err) {
-    console.log("⚠️ Engine Guard: Waiting for binaries...");
+// --- AUDIT BINARY (ANTI-BISU) ---
+function syncPermissions() {
+    try {
+        if (fs.existsSync(ytdlpPath)) execSync(`chmod +x ${ytdlpPath}`);
+        if (fs.existsSync(ffmpegPath)) {
+            execSync(`chmod +x ${ffmpegPath}`);
+            console.log("✅ Luna Engine: FFmpeg Ready.");
+        } else {
+            console.log("⚠️ Luna Engine: FFmpeg not found yet, waiting for curl...");
+        }
+    } catch (err) {
+        console.log("⚠️ Permission Error: " + err.message);
+    }
 }
+
+// Jalankan audit saat startup
+syncPermissions();
 
 bot.catch((err, ctx) => {
     console.log(`❌ LUNA ERROR: ${err.message}`);
-    if (ctx) ctx.reply("⚠️ **Sedang memproses audio...**").catch(() => {});
+    if (ctx) ctx.reply("⚠️ **Koneksi berat.** Sedang menstabilkan...").catch(() => {});
 });
 
 const tempDir = path.join(process.cwd(), 'temp');
@@ -37,13 +46,13 @@ const PROXY_LIST = [
 
 async function getFastestProxy() {
     return new Promise((resolve) => {
-        const globalTimeout = setTimeout(() => resolve(null), 5000);
+        const globalTimeout = setTimeout(() => resolve(null), 4000);
         const tests = PROXY_LIST.map(proxy => {
             return new Promise((res) => {
                 const start = Date.now();
                 try {
                     const proxyUrl = new URL(proxy);
-                    const options = { host: proxyUrl.hostname, port: proxyUrl.port, path: 'http://www.google.com', method: 'GET', timeout: 2500 };
+                    const options = { host: proxyUrl.hostname, port: proxyUrl.port, path: 'http://www.google.com', method: 'GET', timeout: 2000 };
                     const req = http.request(options, () => res({ proxy, latency: Date.now() - start }));
                     req.on('error', () => res({ proxy, latency: 9999 }));
                     req.on('timeout', () => { req.destroy(); res({ proxy, latency: 9999 }); });
@@ -59,7 +68,7 @@ async function getFastestProxy() {
     });
 }
 
-// AUTO-CLEAN 60 DETIK [cite: 2026-02-07]
+// AUTO-CLEAN (Daily Memory Reset) [cite: 2026-02-07]
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -87,7 +96,8 @@ bot.on('message', async (ctx) => {
         const vPath = path.join(tempDir, `luna_${Date.now()}.mp4`);
         
         const fastestProxy = await getFastestProxy();
-        
+        syncPermissions(); // Pastikan izin tetap ada sebelum download
+
         const args = [
             '--no-check-certificate',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -120,13 +130,13 @@ bot.on('message', async (ctx) => {
 
         ls.on('close', async (code) => {
             if (code === 0 && fs.existsSync(vPath)) {
-                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **AUDIO MERGE BERHASIL!**");
+                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **BYPASS & AUDIO MERGE BERHASIL!**");
                 await ctx.replyWithVideo({ source: vPath }).finally(() => {
                     if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
                     ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
                 });
             } else {
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **CRITICAL ERROR**\nPastikan Run Command di Koyeb sudah benar.");
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **CRITICAL ERROR**\nPastikan Run Command di Koyeb sudah diganti.");
                 if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
             }
         });
