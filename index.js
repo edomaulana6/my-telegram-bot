@@ -1,26 +1,32 @@
 const { Telegraf } = require('telegraf');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-// --- KEAMANAN & KONFIGURASI ANTI-CRASH ---
+// --- KONFIGURASI ENGINE ---
 const BOT_TOKEN = (process.env.BOT_TOKEN || "TOKEN_SENSITIVE_DI_SINI").trim();
+const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 180000 });
 
-const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 180000 // Batas tunggu ditingkatkan ke 3 menit untuk proses jahit audio
-});
+// --- FITUR AUTO-PERMISSION (FIX AUDIO) ---
+try {
+    console.log("🛠️ Memberikan izin eksekusi ke binary...");
+    execSync('chmod +x ./ffmpeg ./yt-dlp'); 
+    console.log("✅ Izin berhasil diberikan.");
+} catch (err) {
+    console.log("⚠️ Gagal memberikan izin otomatis: " + err.message);
+}
 
 // GLOBAL ERROR HANDLER
 bot.catch((err, ctx) => {
-    console.log(`❌ LUNA ENGINE ERROR: ${err.message}`);
-    if (ctx) ctx.reply("⚠️ **Sedang menjahit audio...** Mohon tunggu sebentar lagi.").catch(() => {});
+    console.log(`❌ LUNA ERROR: ${err.message}`);
+    if (ctx) ctx.reply("⚠️ **Koneksi berat.** Sedang menjahit audio, mohon tunggu...").catch(() => {});
 });
 
 const tempDir = path.join(process.cwd(), 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// --- DAFTAR PROXY INDONESIA ---
+// --- DAFTAR PROXY INDONESIA AKTIF (Update: 12 Feb 2026) ---
 const PROXY_LIST = [
     'http://103.150.116.154:8080', 
     'http://103.111.54.34:8080',  
@@ -39,11 +45,8 @@ async function getFastestProxy() {
                 try {
                     const proxyUrl = new URL(proxy);
                     const options = {
-                        host: proxyUrl.hostname,
-                        port: proxyUrl.port,
-                        path: 'http://www.google.com',
-                        method: 'GET',
-                        timeout: 2500
+                        host: proxyUrl.hostname, port: proxyUrl.port,
+                        path: 'http://www.google.com', method: 'GET', timeout: 2500
                     };
                     const req = http.request(options, () => res({ proxy, latency: Date.now() - start }));
                     req.on('error', () => res({ proxy, latency: 9999 }));
@@ -52,7 +55,6 @@ async function getFastestProxy() {
                 } catch (e) { res({ proxy, latency: 9999 }); }
             });
         });
-
         Promise.all(tests).then(results => {
             clearTimeout(globalTimeout);
             const valid = results.filter(r => r.latency < 9999).sort((a, b) => a.latency - b.latency);
@@ -61,7 +63,7 @@ async function getFastestProxy() {
     });
 }
 
-// --- AUTO-CLEAN (Pembersihan file temp setiap 60 detik) ---
+// AUTO-CLEAN 60 DETIK
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -84,24 +86,27 @@ bot.on('message', async (ctx) => {
     const isSocial = /(tiktok\.com|instagram\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|youtu\.be|youtube\.com|threads\.net)/i.test(url);
 
     if (isSocial) {
-        let currentFrame = 0, lastUpdate = 0;
-        const statusMsg = await ctx.reply("⚙️ **INITIALIZING ENGINE...**\n" + createSolidBar(0, 0, "📡 Menghubungkan ke Server..."));
+        let currentFrame = 0, lastUpdate = 0, statusText = "📡 Mencari Jalur Indonesia Tercepat...";
+        const statusMsg = await ctx.reply("⚙️ **INITIALIZING ENGINE...**\n" + createSolidBar(0, 0, statusText));
         const vPath = path.join(tempDir, `luna_${Date.now()}.mp4`);
         
         const fastestProxy = await getFastestProxy();
         
-        // --- ARGS DENGAN FFMPEG LOKAL DARI REPOSTORI GITHUB ---
+        // --- ARGS LENGKAP: PROXY + AUDIO MERGE ---
         const args = [
             '--no-check-certificate',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            '--ffmpeg-location', './ffmpeg', // Menggunakan file ffmpeg di root repo Anda
-            '-f', 'bestvideo+bestaudio/best', // Mengambil audio & video terpisah untuk kualitas max
-            '--merge-output-format', 'mp4',   // Menjahit otomatis menggunakan FFmpeg
+            '--ffmpeg-location', path.join(process.cwd(), 'ffmpeg'), 
+            '-f', 'bestvideo+bestaudio/best',
+            '--merge-output-format', 'mp4',
             '--newline', url, '-o', vPath
         ];
 
         if (fastestProxy) {
             args.push('--proxy', fastestProxy);
+            statusText = `🌐 Jalur: Indonesia (${fastestProxy})`;
+        } else {
+            statusText = `⚠️ Jalur Utama (Washington)`;
         }
 
         const ls = spawn('./yt-dlp', args);
@@ -115,7 +120,7 @@ bot.on('message', async (ctx) => {
                 if (now - lastUpdate > 2500) {
                     currentFrame = (currentFrame + 1) % frames.length;
                     ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 
-                        `⚙️ **LUNA ENGINE PROCESSING**\n` + createSolidBar(percent, currentFrame, "🧵 Sedang menjahit audio & video..."),
+                        `⚙️ **LUNA ENGINE PROCESSING**\n` + createSolidBar(percent, currentFrame, statusText),
                         { parse_mode: 'Markdown' }
                     ).catch(() => {});
                     lastUpdate = now;
@@ -124,7 +129,6 @@ bot.on('message', async (ctx) => {
         });
 
         ls.on('close', async (code) => {
-            const platformName = url.includes('tiktok') ? 'TikTok' : 'Instagram';
             if (code === 0 && fs.existsSync(vPath)) {
                 await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **BYPASS & AUDIO MERGE BERHASIL!**");
                 await ctx.replyWithVideo({ source: vPath }).finally(() => {
@@ -132,7 +136,7 @@ bot.on('message', async (ctx) => {
                     ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
                 });
             } else {
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ **ENGINE FAILURE (${platformName})**\nGagal menggabungkan audio. Pastikan file 'ffmpeg' ada di repositori.`);
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **CRITICAL ERROR**\nGagal menjahit audio atau Proxy mati. Coba lagi.");
                 if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
             }
         });
@@ -143,4 +147,4 @@ http.createServer((req, res) => { res.end('Luna Engine Online'); }).listen(8000)
 bot.launch({ dropPendingUpdates: true });
 
 // --- RESET HARIAN ---
-// Sesuai instruksi [cite: 2026-02-07], server akan restart otomatis setiap 24 jam.
+// Memori dibersihkan setiap 60 detik. Reset engine setiap 24 jam. [cite: 2026-02-07]
