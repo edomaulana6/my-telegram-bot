@@ -1,10 +1,10 @@
 {
   "name": "luna-engine",
   "version": "1.0.0",
-  "description": "Bot Downloader Luna",
+  "description": "Bot Downloader Luna - Absolute Accuracy",
   "main": "index.js",
   "scripts": {
-    "start": "mkdir -p temp && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod 777 yt-dlp && YTP_EXE=./yt-dlp PATH=$PATH:. node index.js"
+    "start": "mkdir -p temp /workspace/temp /app/temp && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod 777 yt-dlp && YTP_EXE=./yt-dlp PATH=$PATH:. node index.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
