@@ -5,23 +5,22 @@ const path = require('path');
 const http = require('http');
 
 // --- KEAMANAN & KONFIGURASI ANTI-CRASH ---
-// Token disensor. Isi di Dashboard Koyeb -> Environment Variables (BOT_TOKEN)
 const BOT_TOKEN = (process.env.BOT_TOKEN || "TOKEN_SENSITIVE_DI_SINI").trim();
 
 const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 120000 // Batas tunggu 2 menit agar tidak meledak
+    handlerTimeout: 120000 // Batas tunggu 2 menit
 });
 
-// GLOBAL ERROR HANDLER (Menjaga bot tetap hidup jika terjadi error)
+// GLOBAL ERROR HANDLER
 bot.catch((err, ctx) => {
     console.log(`❌ LUNA ENGINE ERROR: ${err.message}`);
-    if (ctx) ctx.reply("⚠️ **Koneksi sangat berat.** Luna sedang mencoba bertahan, mohon tunggu sebentar...").catch(() => {});
+    if (ctx) ctx.reply("⚠️ **Koneksi sangat berat.** Luna sedang mencoba bertahan...").catch(() => {});
 });
 
 const tempDir = path.join(process.cwd(), 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// DAFTAR 5 PROXY INDONESIA TERUJI AKTIF (Update: 12 Feb 2026)
+// DAFTAR 5 PROXY INDONESIA TERUJI AKTIF
 const PROXY_LIST = [
     'http://103.150.116.154:8080', 
     'http://103.111.54.34:8080',  
@@ -30,11 +29,10 @@ const PROXY_LIST = [
     'http://103.120.129.202:8080'  
 ];
 
-// FUNGSI CEK PROXY TERCEPAT (ANTI-STUCK TIMEOUT 5 DETIK)
+// FUNGSI CEK PROXY TERCEPAT
 async function getFastestProxy() {
     return new Promise((resolve) => {
         const globalTimeout = setTimeout(() => resolve(null), 5000);
-
         const tests = PROXY_LIST.map(proxy => {
             return new Promise((res) => {
                 const start = Date.now();
@@ -63,7 +61,7 @@ async function getFastestProxy() {
     });
 }
 
-// --- AUTO-CLEAN (Pembersihan file temp setiap 60 detik) ---
+// --- AUTO-CLEAN (Pembersihan memori 60 detik) ---
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -95,8 +93,7 @@ bot.on('message', async (ctx) => {
             '--no-check-certificate',
             '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
             '--add-header', 'Referer:https://www.instagram.com/',
-            // PERBAIKAN AUDIO: Mencari file mp4 tunggal yang sudah berisi audio agar tidak bisu tanpa FFmpeg
-            '-f', 'b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b/best',
+            '-f', 'b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b/best', // Fix Audio
             '--newline', url, '-o', vPath
         ];
 
@@ -127,14 +124,18 @@ bot.on('message', async (ctx) => {
         });
 
         ls.on('close', async (code) => {
+            const platformName = url.includes('tiktok') ? 'TikTok' : 'Instagram';
             if (code === 0 && fs.existsSync(vPath)) {
-                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **BYPASS BERHASIL!**\n🚀 **Mengirim video...**");
+                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `✅ **${platformName.toUpperCase()} BYPASS BERHASIL!**\n🚀 **Mengirim video...**`);
                 await ctx.replyWithVideo({ source: vPath }).finally(() => {
                     if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
                     ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
                 });
             } else {
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **ENGINE FAILURE**\nInstagram memblokir jalur ini. Coba link lain.");
+                let errorReason = fastestProxy ? "Proxy Indonesia Down/Terblokir" : "IP Utama Terblokir";
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 
+                    `❌ **ENGINE FAILURE (${platformName})**\nPenyebab: ${errorReason}.\nSaran: Coba kirim ulang link atau hubungi Admin.`
+                );
                 if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
             }
         });
@@ -143,6 +144,3 @@ bot.on('message', async (ctx) => {
 
 http.createServer((req, res) => { res.end('Luna Engine Online'); }).listen(8000);
 bot.launch({ dropPendingUpdates: true });
-
-// --- RESET HARIAN ---
-// Sesuai instruksi: Reset harian otomatis melalui restart instance Koyeb [cite: 2026-02-07]
