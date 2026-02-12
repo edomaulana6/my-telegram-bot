@@ -89,11 +89,15 @@ bot.on('message', async (ctx) => {
         const vPath = path.join(tempDir, `luna_${Date.now()}.mp4`);
         
         const fastestProxy = await getFastestProxy();
+        
+        // --- PERBAIKAN ARGUMEN DOWNLOAD (AUDIO & BYPASS) ---
         const args = [
             '--no-check-certificate',
-            '--user-agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             '--add-header', 'Referer:https://www.instagram.com/',
-            '-f', 'b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b/best', // Fix Audio
+            '--no-playlist',
+            // FORCE AUDIO & VIDEO MERGED (Tanpa FFmpeg)
+            '-f', 'best[ext=mp4][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best',
             '--newline', url, '-o', vPath
         ];
 
@@ -144,3 +148,6 @@ bot.on('message', async (ctx) => {
 
 http.createServer((req, res) => { res.end('Luna Engine Online'); }).listen(8000);
 bot.launch({ dropPendingUpdates: true });
+
+// --- RESET HARIAN ---
+// Restart otomatis 24 jam melalui sistem Koyeb untuk performa maksimal. [cite: 2026-02-07]
