@@ -14,10 +14,17 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
 // DAFTAR PROXY INDONESIA (Akurasi Tinggi)
 const PROXY_LIST = [
-    'http://103.150.116.154:8080', 'http://103.161.184.14:3128', 'http://103.111.54.34:8080',
-    'http://103.147.21.34:80', 'http://103.152.112.112:80', 'http://103.119.145.170:80',
-    'http://103.153.255.42:8080', 'http://103.102.131.206:8080', 'http://103.167.135.106:80',
-    'http://202.152.41.146:80'
+    // Proxy Indonesia Elite & High Anonymous (Peluang tembus IG lebih besar)
+    'http://103.150.116.154:8080',
+    'http://103.161.184.14:3128',
+    'http://103.111.54.34:8080',
+    'http://103.47.132.34:80',
+    'http://103.152.112.112:80',
+    'http://103.167.135.106:80',
+    'http://103.155.104.253:3128',
+    'http://202.152.41.146:80',
+    'http://103.120.129.202:8080',
+    'http://103.10.168.106:8080'
 ];
 
 // FUNGSI CEK PROXY TERCEPAT (ANTI-STUCK TIMEOUT 5 DETIK)
