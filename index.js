@@ -4,34 +4,27 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-// --- KONFIGURASI ENGINE ---
 const BOT_TOKEN = (process.env.BOT_TOKEN || "TOKEN_SENSITIVE_DI_SINI").trim();
 const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 180000 });
 
 const ffmpegPath = path.join(process.cwd(), 'ffmpeg');
 const ytdlpPath = path.join(process.cwd(), 'yt-dlp');
 
-// --- AUDIT BINARY (ANTI-BISU) ---
+// --- AUDIT BINARY ---
 function syncPermissions() {
     try {
         if (fs.existsSync(ytdlpPath)) execSync(`chmod +x ${ytdlpPath}`);
-        if (fs.existsSync(ffmpegPath)) {
-            execSync(`chmod +x ${ffmpegPath}`);
-            console.log("✅ Luna Engine: FFmpeg Ready.");
-        } else {
-            console.log("⚠️ Luna Engine: FFmpeg not found yet, waiting for curl...");
-        }
+        if (fs.existsSync(ffmpegPath)) execSync(`chmod +x ${ffmpegPath}`);
+        console.log("✅ Engine Guard: Permissions Synced.");
     } catch (err) {
         console.log("⚠️ Permission Error: " + err.message);
     }
 }
 
-// Jalankan audit saat startup
 syncPermissions();
 
 bot.catch((err, ctx) => {
     console.log(`❌ LUNA ERROR: ${err.message}`);
-    if (ctx) ctx.reply("⚠️ **Koneksi berat.** Sedang menstabilkan...").catch(() => {});
 });
 
 const tempDir = path.join(process.cwd(), 'temp');
@@ -68,7 +61,7 @@ async function getFastestProxy() {
     });
 }
 
-// AUTO-CLEAN (Daily Memory Reset) [cite: 2026-02-07]
+// AUTO-CLEAN [cite: 2026-02-07]
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -96,7 +89,7 @@ bot.on('message', async (ctx) => {
         const vPath = path.join(tempDir, `luna_${Date.now()}.mp4`);
         
         const fastestProxy = await getFastestProxy();
-        syncPermissions(); // Pastikan izin tetap ada sebelum download
+        syncPermissions();
 
         const args = [
             '--no-check-certificate',
@@ -130,13 +123,13 @@ bot.on('message', async (ctx) => {
 
         ls.on('close', async (code) => {
             if (code === 0 && fs.existsSync(vPath)) {
-                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **BYPASS & AUDIO MERGE BERHASIL!**");
+                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **AUDIO MERGE BERHASIL!**");
                 await ctx.replyWithVideo({ source: vPath }).finally(() => {
                     if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
                     ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
                 });
             } else {
-                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **CRITICAL ERROR**\nPastikan Run Command di Koyeb sudah diganti.");
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **CRITICAL ERROR**\nPastikan video tidak diprivat.");
                 if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
             }
         });
@@ -144,4 +137,9 @@ bot.on('message', async (ctx) => {
 });
 
 http.createServer((req, res) => { res.end('Luna Engine Online'); }).listen(8000);
-bot.launch({ dropPendingUpdates: true });
+
+// --- MEMBERSIHKAN KONFLIK SEBELUM JALAN ---
+bot.telegram.deleteWebhook().then(() => {
+    console.log("🚀 Webhook Deleted. Starting Polling...");
+    bot.launch({ dropPendingUpdates: true });
+});
