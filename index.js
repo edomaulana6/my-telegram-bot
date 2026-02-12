@@ -4,24 +4,24 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-// KONFIGURASI TOKEN
 const BOT_TOKEN = (process.env.BOT_TOKEN || "8521111355:AAHfe4FIdrJHCJA7xy0EgzeK6EIINdhhBYk").trim();
 const bot = new Telegraf(BOT_TOKEN);
 
-const tempDir = path.join(__dirname, 'temp');
+// Gunakan path relatif agar konsisten dengan mkdir -p temp
+const tempDir = path.join(process.cwd(), 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// --- AUTO-CLEAN (Pembersihan memori setiap 60 detik) ---
+// --- AUTO-CLEAN (Pembersihan setiap 60 detik) ---
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
         files.forEach(file => {
-            fs.unlink(path.join(tempDir, file), () => {});
+            const filePath = path.join(tempDir, file);
+            fs.unlink(filePath, () => {});
         });
     });
-}, 60 * 1000); 
+}, 60 * 1000);
 
-// Animasi Frame & Progress Bar ▓░
 const frames = ["🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚"];
 function createSolidBar(p, frameIndex) {
     const P = Math.floor(p / 10);
@@ -29,87 +29,78 @@ function createSolidBar(p, frameIndex) {
     return `${frames[frameIndex]} **PROGRESS: ${p}%**\n**${bar}**`;
 }
 
-// --- HANDLER PESAN ---
 bot.on('message', async (ctx) => {
     const text = ctx.message.text;
-    if (!text) return;
+    if (!text || !/https?:\/\/[^\s]+/.test(text)) return;
 
-    const match = text.match(/https?:\/\/[^\s]+/);
-    if (match) {
-        const url = match[0];
-        const isSocial = /(tiktok\.com|instagram\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|youtu\.be|youtube\.com|threads\.net)/i.test(url);
+    const url = text.match(/https?:\/\/[^\s]+/)[0];
+    const isSocial = /(tiktok\.com|instagram\.com|facebook\.com|fb\.watch|x\.com|twitter\.com|youtu\.be|youtube\.com|threads\.net)/i.test(url);
 
-        if (isSocial) {
-            let currentFrame = 0;
-            let lastUpdate = 0;
-            const statusMsg = await ctx.reply("⚙️ **INITIALIZING ENGINE...**\n" + createSolidBar(0, 0));
-            const vPath = path.join(tempDir, `vid_${Date.now()}.mp4`);
-            
-            // SPAWN YT-DLP UNTUK KECEPATAN & REAL-TIME PROGRESS
-            const ls = spawn('./yt-dlp', [
-                '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
-                '--no-check-certificate', 
-                '--newline', 
-                url, 
-                '-o', vPath
-            ]);
+    if (isSocial) {
+        let currentFrame = 0;
+        let lastUpdate = 0;
+        const statusMsg = await ctx.reply("⚙️ **INITIALIZING ENGINE...**\n" + createSolidBar(0, 0));
+        
+        // Penamaan file yang unik dan aman
+        const fileName = `vid_${Date.now()}.mp4`;
+        const vPath = path.join(tempDir, fileName);
+        
+        const ls = spawn('./yt-dlp', [
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+            '--no-check-certificate', 
+            '--newline', 
+            url, 
+            '-o', vPath
+        ]);
 
-            ls.stdout.on('data', (data) => {
-                const output = data.toString();
-                const matchPercent = output.match(/(\d+(\.\d+)?%)/);
-                if (matchPercent) {
-                    const percent = parseFloat(matchPercent[0]);
-                    const now = Date.now();
-                    // Throttling 1.5 detik agar aman dari Rate Limit Telegram
-                    if (now - lastUpdate > 1500) {
-                        currentFrame = (currentFrame + 1) % frames.length;
-                        ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 
-                            `⚙️ **LUNA ENGINE PROCESSING**\n` +
-                            `${createSolidBar(percent, currentFrame)}\n\n` +
-                            `📡 **Status:** Mengunduh media dari Cloud...`,
-                            { parse_mode: 'Markdown' }
-                        ).catch(() => {});
-                        lastUpdate = now;
-                    }
+        ls.stdout.on('data', (data) => {
+            const output = data.toString();
+            const matchPercent = output.match(/(\d+(\.\d+)?%)/);
+            if (matchPercent) {
+                const percent = parseFloat(matchPercent[0]);
+                const now = Date.now();
+                if (now - lastUpdate > 2000) {
+                    currentFrame = (currentFrame + 1) % frames.length;
+                    ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, 
+                        `⚙️ **LUNA ENGINE PROCESSING**\n` +
+                        `${createSolidBar(percent, currentFrame)}\n\n` +
+                        `📡 **Status:** Downloading...`,
+                        { parse_mode: 'Markdown' }
+                    ).catch(() => {});
+                    lastUpdate = now;
                 }
-            });
+            }
+        });
 
-            ls.on('close', async (code) => {
-                if (code === 0) {
-                    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **COMPLETE!**\n🚀 **Sedang mengirim video...**");
+        ls.on('close', async (code) => {
+            if (code === 0 && fs.existsSync(vPath)) {
+                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "✅ **COMPLETE!**\n🚀 **Sending media...**").catch(() => {});
+                
+                try {
                     await ctx.replyWithVideo({ source: vPath });
+                } catch (err) {
+                    console.error("Upload Error:", err.message);
+                    ctx.reply("❌ Gagal mengirim video ke Telegram.");
+                } finally {
                     if (fs.existsSync(vPath)) fs.unlinkSync(vPath);
                     ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
-                } else {
-                    ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **ENGINE FAILURE:** Link tidak didukung atau video tidak tersedia.");
                 }
-            });
-
-            ls.on('error', (err) => {
-                console.error("Critical Engine Error:", err.message);
-                ctx.reply("❌ Terjadi kesalahan fatal pada mesin pengunduh.");
-            });
-            return;
-        }
+            } else {
+                ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "❌ **ENGINE FAILURE** atau file tidak ditemukan.");
+            }
+        });
     }
 });
 
-// KEEP-ALIVE UNTUK KOYEB (PORT 8000)
-http.createServer((req, res) => { 
-    res.end('Luna Pure Downloader is Healthy'); 
-}).listen(8000);
+http.createServer((req, res) => { res.end('Luna Online'); }).listen(8000);
 
-// PROTOKOL STARTUP
 async function launchBot() {
     try {
         await bot.launch({ dropPendingUpdates: true });
-        console.log("✅ BOT ONLINE - PURE VIDEO DOWNLOADER - AKURASI 10.000%");
+        console.log("✅ BOT ONLINE - STABLE VERSION");
     } catch (err) {
-        if (err.response?.error_code === 409) {
-            setTimeout(launchBot, 5000); 
-        } else {
-            process.exit(1);
-        }
+        if (err.response?.error_code === 409) setTimeout(launchBot, 5000); 
+        else process.exit(1);
     }
 }
 launchBot();
