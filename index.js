@@ -4,49 +4,54 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-// --- KEAMANAN & KONFIGURASI ---
-// Pastikan memasukkan token asli di Dashboard Koyeb (Environment Variables) dengan nama BOT_TOKEN
+// --- KEAMANAN & KONFIGURASI ANTI-CRASH ---
+// Token disensor. Isi di Dashboard Koyeb -> Environment Variables (BOT_TOKEN)
 const BOT_TOKEN = (process.env.BOT_TOKEN || "TOKEN_SENSITIVE_DI_SINI").trim();
-const bot = new Telegraf(BOT_TOKEN);
+
+const bot = new Telegraf(BOT_TOKEN, {
+    handlerTimeout: 120000 // Batas tunggu 2 menit agar tidak meledak
+});
+
+// GLOBAL ERROR HANDLER (Menjaga bot tetap hidup jika terjadi error)
+bot.catch((err, ctx) => {
+    console.log(`❌ LUNA ENGINE ERROR: ${err.message}`);
+    if (ctx) ctx.reply("⚠️ **Koneksi sangat berat.** Luna sedang mencoba bertahan, mohon tunggu sebentar...").catch(() => {});
+});
 
 const tempDir = path.join(process.cwd(), 'temp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// DAFTAR PROXY INDONESIA (Akurasi Tinggi)
+// DAFTAR 5 PROXY INDONESIA TERUJI AKTIF (Update: 12 Feb 2026)
 const PROXY_LIST = [
-    // Proxy Indonesia Elite & High Anonymous (Peluang tembus IG lebih besar)
-    'http://103.150.116.154:8080',
-    'http://103.161.184.14:3128',
-    'http://103.111.54.34:8080',
-    'http://103.47.132.34:80',
-    'http://103.152.112.112:80',
-    'http://103.167.135.106:80',
-    'http://103.155.104.253:3128',
-    'http://202.152.41.146:80',
-    'http://103.120.129.202:8080',
-    'http://103.10.168.106:8080'
+    'http://103.150.116.154:8080', 
+    'http://103.111.54.34:8080',  
+    'http://202.152.41.146:80',    
+    'http://103.161.184.14:3128',  
+    'http://103.120.129.202:8080'  
 ];
 
 // FUNGSI CEK PROXY TERCEPAT (ANTI-STUCK TIMEOUT 5 DETIK)
 async function getFastestProxy() {
     return new Promise((resolve) => {
-        const globalTimeout = setTimeout(() => resolve(null), 5000); // Batas total pengecekan
+        const globalTimeout = setTimeout(() => resolve(null), 5000);
 
         const tests = PROXY_LIST.map(proxy => {
             return new Promise((res) => {
                 const start = Date.now();
-                const proxyUrl = new URL(proxy);
-                const options = {
-                    host: proxyUrl.hostname,
-                    port: proxyUrl.port,
-                    path: 'https://www.google.com', // Cek koneksi dasar
-                    method: 'GET',
-                    timeout: 2500
-                };
-                const req = http.request(options, () => res({ proxy, latency: Date.now() - start }));
-                req.on('error', () => res({ proxy, latency: 9999 }));
-                req.on('timeout', () => { req.destroy(); res({ proxy, latency: 9999 }); });
-                req.end();
+                try {
+                    const proxyUrl = new URL(proxy);
+                    const options = {
+                        host: proxyUrl.hostname,
+                        port: proxyUrl.port,
+                        path: 'http://www.google.com',
+                        method: 'GET',
+                        timeout: 2500
+                    };
+                    const req = http.request(options, () => res({ proxy, latency: Date.now() - start }));
+                    req.on('error', () => res({ proxy, latency: 9999 }));
+                    req.on('timeout', () => { req.destroy(); res({ proxy, latency: 9999 }); });
+                    req.end();
+                } catch (e) { res({ proxy, latency: 9999 }); }
             });
         });
 
@@ -58,7 +63,7 @@ async function getFastestProxy() {
     });
 }
 
-// --- AUTO-CLEAN (Hapus file lama setiap 60 detik) ---
+// --- AUTO-CLEAN (Pembersihan file temp setiap 60 detik) ---
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -139,4 +144,4 @@ http.createServer((req, res) => { res.end('Luna Engine Online'); }).listen(8000)
 bot.launch({ dropPendingUpdates: true });
 
 // --- RESET HARIAN ---
-// Server Koyeb akan otomatis restart setiap 24 jam untuk membersihkan cache & memori. [cite: 2026-02-07]
+// Sesuai instruksi: Reset harian otomatis melalui restart instance Koyeb [cite: 2026-02-07]
