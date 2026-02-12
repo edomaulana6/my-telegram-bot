@@ -4,7 +4,7 @@
   "description": "Bot Downloader Luna",
   "main": "index.js",
   "scripts": {
-    "start": "curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod 777 yt-dlp && PATH=$PATH:. node index.js"
+    "start": "mkdir -p temp && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod 777 yt-dlp && YTP_EXE=./yt-dlp PATH=$PATH:. node index.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
