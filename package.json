@@ -1,18 +1,20 @@
 {
   "name": "luna-engine",
   "version": "1.0.0",
-  "description": "Bot Downloader Luna - Absolute Accuracy",
+  "description": "High-Performance Video Downloader for Koyeb",
   "main": "index.js",
   "scripts": {
-    "start": "mkdir -p temp /workspace/temp /app/temp && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod 777 yt-dlp && YTP_EXE=./yt-dlp PATH=$PATH:. node index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "fs": "0.0.1-security",
-    "http": "0.0.1-security",
-    "path": "^0.12.7",
     "telegraf": "^4.16.3",
-    "util": "^0.12.5",
-    "yt-dlp-exec": "^1.0.2"
+    "yt-dlp-exec": "^1.0.2",
+    "fastq": "^1.17.0",
+    "http": "0.0.1-security",
+    "fs": "0.0.1-security",
+    "path": "^0.12.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
