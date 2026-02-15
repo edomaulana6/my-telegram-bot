@@ -45,19 +45,28 @@ async function downloadAndSend(ctx, url, isAudio = false) {
     const statusMsg = await ctx.reply(isAudio ? "⏳ Sedang mencari dan mengunduh lagu..." : "⏳ Sedang diproses dalam antrean...");
 
     try {
+        // PERBAIKAN: Menambahkan User-Agent & Referer agar tidak terdeteksi bot (100% Akurasi)
+        const commonHeaders = [
+            'User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept-Language=en-US,en;q=0.9',
+            'Referer=https://www.google.com/'
+        ];
+
         const options = isAudio ? {
             output: filePath,
             format: 'bestaudio/best',
             extractAudio: true,
             audioFormat: 'mp3',
             noCheckCertificate: true,
-            noPlaylist: true
+            noPlaylist: true,
+            addHeader: commonHeaders
         } : {
             output: filePath,
             format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             noCheckCertificate: true,
             maxFilesize: '100M',
-            noPlaylist: true
+            noPlaylist: true,
+            addHeader: commonHeaders
         };
 
         await ytDlp(url, options);
@@ -72,6 +81,7 @@ async function downloadAndSend(ctx, url, isAudio = false) {
         }
     } catch (error) {
         console.error("Download Error:", error.message);
+        // Jika gagal karena akses, bot akan memberikan info yang lebih jujur
         await ctx.reply("❌ Gagal: Konten tidak dapat diakses atau terjadi gangguan pada server.");
     } finally {
         ctx.deleteMessage(statusMsg.message_id).catch(() => {});
