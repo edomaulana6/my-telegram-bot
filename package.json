@@ -1,7 +1,7 @@
 {
   "name": "luna-engine",
   "version": "1.0.0",
-  "description": "High-Performance Video Downloader for Koyeb",
+  "description": "High-Performance Video and Music Downloader for Koyeb",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,10 +9,8 @@
   "dependencies": {
     "telegraf": "^4.16.3",
     "yt-dlp-exec": "^1.0.2",
-    "fastq": "^1.17.0",
-    "http": "0.0.1-security",
-    "fs": "0.0.1-security",
-    "path": "^0.12.7"
+    "yt-search": "^2.10.3",
+    "fastq": "^1.17.0"
   },
   "engines": {
     "node": ">=18.0.0"
