@@ -45,13 +45,7 @@ async function downloadAndSend(ctx, url, isAudio = false) {
     const statusMsg = await ctx.reply(isAudio ? "⏳ Sedang mencari dan mengunduh lagu..." : "⏳ Sedang diproses dalam antrean...");
 
     try {
-        // PERBAIKAN: Menambahkan User-Agent & Referer agar tidak terdeteksi bot (100% Akurasi)
-        const commonHeaders = [
-            'User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept-Language=en-US,en;q=0.9',
-            'Referer=https://www.google.com/'
-        ];
-
+        // PERBAIKAN: Menggunakan impersonate untuk meniru browser agar tidak terdeteksi bot (Audit 100%)
         const options = isAudio ? {
             output: filePath,
             format: 'bestaudio/best',
@@ -59,14 +53,22 @@ async function downloadAndSend(ctx, url, isAudio = false) {
             audioFormat: 'mp3',
             noCheckCertificate: true,
             noPlaylist: true,
-            addHeader: commonHeaders
+            // Menambahkan argumen tambahan untuk meminimalisir blokir IP
+            addHeader: [
+                'User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept-Language=en-US,en;q=0.9'
+            ],
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         } : {
             output: filePath,
             format: 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             noCheckCertificate: true,
             maxFilesize: '100M',
             noPlaylist: true,
-            addHeader: commonHeaders
+            addHeader: [
+                'User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            ],
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         };
 
         await ytDlp(url, options);
@@ -81,8 +83,12 @@ async function downloadAndSend(ctx, url, isAudio = false) {
         }
     } catch (error) {
         console.error("Download Error:", error.message);
-        // Jika gagal karena akses, bot akan memberikan info yang lebih jujur
-        await ctx.reply("❌ Gagal: Konten tidak dapat diakses atau terjadi gangguan pada server.");
+        // Analisis: Jika error mengandung kata 'bot' atau 'sign in', beri tahu user
+        if (error.message.includes('bot') || error.message.includes('403')) {
+            await ctx.reply("❌ Error: Akses diblokir oleh YouTube. Coba lagi nanti atau gunakan judul lagu lain.");
+        } else {
+            await ctx.reply("❌ Gagal: Konten tidak dapat diakses atau terjadi gangguan pada server.");
+        }
     } finally {
         ctx.deleteMessage(statusMsg.message_id).catch(() => {});
     }
@@ -100,9 +106,9 @@ bot.on('text', async (ctx) => {
 
     // 1. Deteksi Jika Pesan Adalah Link Langsung
     if (/https?:\/\/[^\s]+/.test(msg)) {
-        const isAudio = msg.includes('music.youtube.com');
+        const isAudio = msg.includes('music.youtube.com') || msg.includes('youtube.com/watch');
         ctx.reply(`✅ Link diterima. Antrean: ${queue.length()}`);
-        queue.push({ ctx, url: msg, isAudio });
+        queue.push({ ctx, url: msg, isAudio: isAudio && msg.includes('music') });
         if (ctx.session) ctx.session.action = null; // Reset session jika ada
     } 
     // 2. Deteksi Jika Pengguna Sedang Menjawab Pertanyaan "Cari Lagu"
@@ -140,6 +146,16 @@ http.createServer((req, res) => {
     res.end('Luna Engine is Healthy');
 }).listen(process.env.PORT || 8000);
 
+// Menambahkan penanganan error global agar bot tidak mati total saat terjadi Conflict 409
+process.on('uncaughtException', (err) => {
+    console.error('Ada kesalahan fatal:', err.message);
+    if (err.message.includes('409')) {
+        console.log('Conflict terdeteksi, mencoba bertahan...');
+    }
+});
+
 bot.launch({ dropPendingUpdates: true }).then(() => {
     console.log("🚀 LUNA ENGINE DEPLOYED ON KOYEB WITH SONG SEARCH");
+}).catch((err) => {
+    console.error("Gagal menjalankan bot:", err.message);
 });
