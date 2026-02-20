@@ -1,18 +1,20 @@
 {
   "name": "luna-engine-ultra",
   "version": "4.1.0",
-  "description": "Bot Downloader High Performance",
+  "description": "Bot Downloader High Performance for Telegram",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "telegraf": "^4.16.3",
     "yt-dlp-exec": "^1.0.2",
     "fastq": "^1.17.1",
     "crypto": "^1.0.1"
   },
-  "scripts": {
-    "start": "node index.js"
-  },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "author": "Luna",
+  "license": "ISC"
 }
