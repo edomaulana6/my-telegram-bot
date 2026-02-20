@@ -1,7 +1,6 @@
 {
-  "name": "my-telegram-bot",
+  "name": "luna",
   "version": "1.0.0",
-  "description": "Bot Downloader Luna Engine",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,7 +8,6 @@
   "dependencies": {
     "telegraf": "^4.16.3",
     "yt-dlp-exec": "^1.0.2",
-    "fastq": "^1.17.1",
-    "crypto": "^1.0.1"
+    "fastq": "^1.17.1"
   }
 }
