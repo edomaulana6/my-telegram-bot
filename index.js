@@ -1,97 +1,99 @@
 // -*- coding: utf-8 -*-
-const { Telegraf, session } = require('telegraf'); 
-const { exec } = require('child_process'); // Gunakan child_process agar tidak bisa dibantah sistem
+const { Telegraf, session } = require('telegraf');
+const { message } = require('telegraf/filters');
+const ytdl = require('@distube/ytdl-core'); // Bypass enkripsi terbaru
 const fastq = require('fastq');
-const fs = require('fs');
-const path = require('path');
 const http = require('http');
-const crypto = require('crypto');
-const fetch = require('node-fetch');
-const util = require('util');
-const execPromise = util.promisify(exec);
+const axios = require('axios');
 
-const BOT_TOKEN = process.env.BOT_TOKEN || "MASUKKAN_TOKEN_BOT_ANDA_DI_SINI";
+// --- KONFIGURASI PERSISI ---
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const bot = new Telegraf(BOT_TOKEN);
-const tempDir = '/tmp/luna_engine';
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-// --- AUDIT RAM 1 MENIT ---
+// --- AUDIT RESOURCE 1 MENIT ---
+// Menjaga agar Koyeb tidak melakukan OOM Kill (Out of Memory)
 setInterval(() => {
-    const used = process.memoryUsage();
-    console.log(`📊 [AUDIT RAM] RSS: ${Math.round(used.rss / 1024 / 1024)}MB`);
-    if (global.gc && used.rss > 400 * 1024 * 1024) global.gc();
+    const used = process.memoryUsage().rss / 1024 / 1024;
+    console.log(`📊 [AUDIT RAM] Usage: ${Math.round(used)}MB / Limit: 512MB`);
+    if (global.gc && used > 400) global.gc();
 }, 60000);
 
-async function getRealUrl(url) {
-    try {
-        const res = await fetch(url, { method: 'GET', redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } });
-        let finalUrl = res.url;
-        if (finalUrl.includes('facebook.com/share/r/')) finalUrl = finalUrl.replace('share/r/', 'reels/');
-        return finalUrl;
-    } catch { return url; }
-}
-
+// --- ANTRIAN PROSES (Concurrency: 3) ---
 const queue = fastq.promise(async (task) => {
-    return downloadAndSend(task.ctx, task.url, task.isAudio, task.isSoundCloud);
+    return engineCore(task.ctx, task.url, task.isAudio);
 }, 3);
 
-// --- CORE ENGINE (MANUAL BYPASS) ---
-async function downloadAndSend(ctx, url, isAudio = false, isSoundCloud = false) {
-    const ext = isAudio ? 'mp3' : 'mp4';
-    const filePath = path.join(tempDir, `luna_${crypto.randomBytes(4).toString('hex')}.${ext}`);
-    const statusMsg = await ctx.reply(isAudio ? "🎵 Menyiapkan audio..." : "🚀 HARD-BYPASS: Menyiapkan video...");
+// --- CORE ENGINE (STREAMING BYPASS) ---
+async function engineCore(ctx, url, isAudio = false) {
+    const statusMsg = await ctx.reply(isAudio ? "🎵 Menyiapkan audio..." : "🚀 HARD-BYPASS: Streaming video...");
 
     try {
-        const finalTargetUrl = isSoundCloud ? url : await getRealUrl(url);
-        
-        // --- LOGIKA AGRESIF: MEMANGGIL BINARY SISTEM SECARA LANGSUNG ---
-        // Kita tidak pakai library yt-dlp-exec lagi untuk eksekusi agar tidak salah path
-        const binary = "/usr/local/bin/yt-dlp";
-        const format = isAudio ? "bestaudio/best" : "b[ext=mp4]/best[ext=mp4]/best";
-        const cmd = `${binary} "${finalTargetUrl}" -o "${filePath}" --no-check-certificate --no-playlist --format "${format}" --socket-timeout 45 --no-warnings --quiet`;
+        if (ytdl.validateURL(url)) {
+            // Mengambil info video tanpa mendownload (hemat data)
+            const info = await ytdl.getInfo(url);
+            const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
+            
+            // Format Otomatis: Audio Only atau Video+Audio (MP4)
+            const options = {
+                quality: isAudio ? 'highestaudio' : 'highestvideo',
+                filter: isAudio ? 'audioonly' : 'videoandaudio',
+            };
 
-        console.log(`🛠️ EXECUTING: ${cmd}`);
-        await execPromise(cmd);
+            const stream = ytdl(url, options);
 
-        if (fs.existsSync(filePath)) {
-            const options = { caption: "✅ Berhasil!", supports_streaming: true };
             if (isAudio) {
-                await ctx.replyWithAudio({ source: filePath }, options);
+                await ctx.replyWithAudio({ source: stream, filename: `${title}.mp3` }, { caption: "✅ Audio Berhasil!" });
             } else {
-                await ctx.replyWithVideo({ source: filePath }, options).catch(async () => {
-                    await ctx.replyWithVideo({ source: filePath });
-                });
+                await ctx.replyWithVideo({ source: stream, filename: `${title}.mp4` }, { caption: "✅ Video Berhasil!", supports_streaming: true });
             }
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } else {
+            // Logika untuk link umum (TikTok/Instagram) via Direct Stream Axios
+            const response = await axios({ method: 'get', url, responseType: 'stream' });
+            await ctx.replyWithDocument({ source: response.data, filename: 'Luna_Download.mp4' });
         }
     } catch (error) {
         console.error("Engine Error:", error.message);
-        await ctx.reply("❌ Gagal. Link mati atau proteksi platform terlalu kuat.");
+        await ctx.reply("❌ Gagal. Proteksi platform terlalu kuat atau link sudah kadaluarsa.");
     } finally {
         ctx.deleteMessage(statusMsg.message_id).catch(() => {});
     }
 }
 
-bot.on('text', async (ctx) => {
+// --- HANDLER ---
+bot.on(message('text'), async (ctx) => {
     const msg = ctx.message.text.trim();
-    const urlPattern = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/ig;
+    const urlPattern = /https?:\/\/\S+/gi;
     const links = msg.match(urlPattern);
 
     if (links) {
-        queue.push({ ctx, url: links[0], isAudio: links[0].includes('music.youtube.com'), isSoundCloud: false });
+        const url = links[0];
+        const isAudio = url.includes('music.youtube.com') || msg.includes('--audio');
+        queue.push({ ctx, url, isAudio });
         return;
     }
 
     if (msg.toLowerCase().startsWith('play ')) {
         const query = msg.slice(5).trim();
-        ctx.reply(`🔎 Mencari "${query}"...`);
-        queue.push({ ctx, url: query, isAudio: true, isSoundCloud: true });
+        ctx.reply(`🔎 Mencari "${query}" via Engine...`);
+        // Catatan: Anda bisa menambahkan yt-search di sini untuk mencari link otomatis
+        queue.push({ ctx, url: query, isAudio: true });
         return;
     }
 
-    if (msg === '/start') ctx.reply("🔥 Luna Engine v4.8 HARD-BYPASS Aktif!\n\nMemaksa penggunaan sistem binary terbaru.");
+    if (msg === '/start') {
+        ctx.reply("🔥 Luna Engine v8.0 HARD-BYPASS Online!\n\nRunning on Koyeb Native Node.js.");
+    }
 });
 
-http.createServer((req, res) => { res.writeHead(200); res.end('Healthy'); }).listen(process.env.PORT || 8000);
+// --- KOYEB HEALTH CHECK (PORT 8000) ---
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Luna Engine v8.0 is Healthy');
+}).listen(process.env.PORT || 8000);
+
 bot.launch({ dropPendingUpdates: true });
-                                                 
+
+// Elegant Shutdown
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+            
