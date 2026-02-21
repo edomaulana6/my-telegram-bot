@@ -1,10 +1,10 @@
 FROM node:20-alpine
 WORKDIR /app
-# FFmpeg wajib untuk menyatukan stream audio/video publik
+# Instal FFmpeg untuk penggabungan video & audio berkualitas tinggi
 RUN apk add --no-cache ffmpeg
 COPY package*.json ./
 RUN npm install --production
 COPY . .
 EXPOSE 8000
-# Flag --expose-gc wajib agar Reset RAM 1 Menit berfungsi
+# WAJIB: Flag ini untuk mengaktifkan fitur Reset RAM
 CMD ["node", "--expose-gc", "index.js"]
