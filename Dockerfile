@@ -1,10 +1,24 @@
-FROM node:20-alpine
+FROM node:16
+
+# Install FFmpeg
+RUN apt-get update && \
+    apt-get install -y ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set working directory
 WORKDIR /app
-# Instal FFmpeg untuk penggabungan video & audio berkualitas tinggi
-RUN apk add --no-cache ffmpeg
+
+# Copy package.json dan package-lock.json
 COPY package*.json ./
-RUN npm install --production
+
+# Install dependencies
+RUN npm install
+
+# Copy kode aplikasi
 COPY . .
-EXPOSE 8000
-# WAJIB: Flag ini untuk mengaktifkan fitur Reset RAM
-CMD ["node", "--expose-gc", "index.js"]
+
+# Expose port
+EXPOSE 3000
+
+# Jalankan aplikasi
+CMD ["node", "index.js"]
