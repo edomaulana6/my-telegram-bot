@@ -1,6 +1,7 @@
 {
-  "name": "universal-upscaler-bot-v2",
+  "name": "universal-downloader-ramadan",
   "version": "2.1.0",
+  "description": "Bot All-Platform Downloader with 1080p Upscale",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,5 +12,7 @@
   },
   "engines": {
     "node": ">=18.20.0"
-  }
+  },
+  "author": "Edo Maulana",
+  "license": "ISC"
 }
