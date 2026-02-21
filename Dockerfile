@@ -1,7 +1,7 @@
-FROM node:16
+FROM node:18
 
 # Install FFmpeg
-RUN apt-get update && \
+RUN apt-get update --allow-releaseinfo-change && \
     apt-get install -y ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 3000
 
 # Jalankan aplikasi
-CMD ["node", "index.js"]
+CMD
