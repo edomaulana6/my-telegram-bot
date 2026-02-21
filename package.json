@@ -1,15 +1,14 @@
 {
-  "name": "luna-engine-ultra",
-  "version": "7.0.0",
+  "name": "my-telegram-bot",
+  "version": "1.0.0",
+  "description": "YouTube Downloader with Upscale",
   "main": "index.js",
-  "dependencies": {
-    "telegraf": "^4.16.3",
-    "@distube/ytdl-core": "latest",
-    "axios": "^1.6.7",
-    "fastq": "^1.17.1",
-    "http": "^0.0.1-security"
-  },
   "scripts": {
-    "start": "node --expose-gc index.js"
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.12.0",
+    "ytdl-core": "latest",
+    "axios": "^1.6.0"
   }
 }
