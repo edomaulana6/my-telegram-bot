@@ -1,105 +1,90 @@
 const { Telegraf } = require('telegraf');
 const ytdl = require('ytdl-core');
-const axios = require('axios');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-// Inisialisasi bot dengan Token dari Environment Variable
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-bot.on('text', async (ctx) => {
-  const text = ctx.message.text;
+// Pesan Selamat Datang yang Islami dan Santun
+bot.start((ctx) => {
+  ctx.reply(
+    "Assalamu'alaikum Warahmatullahi Wabarakatuh ✨\n\n" +
+    "Ahlan wa Sahlan di Bot Download Video YouTube.\n\n" +
+    "Di bulan suci Ramadan yang penuh berkah ini, semoga fasilitas ini dapat membantu Anda menyebarkan kebaikan atau menimba ilmu bermanfaat. Silakan kirimkan tautan (link) video yang ingin Anda simpan dalam kualitas 1080p HD.\n\n" +
+    "Selamat menjalankan ibadah puasa, semoga Allah subhanahu wa ta'ala menerima amal ibadah kita semua. 🙏"
+  );
+});
 
-  // 1. Validasi URL YouTube
-  if (!ytdl.validateURL(text)) {
-    return ctx.reply("⚠️ Maaf, hanya link YouTube yang didukung.");
+bot.on('text', async (ctx) => {
+  const url = ctx.message.text;
+
+  if (!ytdl.validateURL(url)) {
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+      return ctx.reply("Afwan (mohon maaf), tautan yang Anda berikan sepertinya kurang tepat. Silakan diperiksa kembali, barakallahu feek.");
+    }
+    return;
   }
 
-  const status = await ctx.reply("🔎 Sedang memproses dan meng-upscale ke 1080p...");
+  const status = await ctx.reply("🌙 Bismillah, sedang menyiapkan proses unduhan... Mohon kesabaran Anda sembari memperbanyak istighfar.");
 
   try {
-    const info = await ytdl.getInfo(text);
-    
-    // Pilih format video tertinggi dan audio tertinggi secara terpisah
-    const videoFormat = ytdl.chooseFormat(info.formats, { quality: 'highestvideo', filter: 'videoonly' });
-    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
+    const info = await ytdl.getInfo(url);
+    const id = Date.now();
+    const videoFile = `v_${id}.mp4`;
+    const audioFile = `a_${id}.mp3`;
+    const outputFile = `1080p_${id}.mp4`;
 
-    if (!videoFormat || !audioFormat) {
-      return ctx.reply("⚠️ Gagal mendapatkan format video/audio yang sesuai.");
-    }
+    const videoStream = ytdl(url, { quality: 'highestvideo' });
+    const audioStream = ytdl(url, { quality: 'highestaudio' });
 
-    const videoFile = `video_${Date.now()}.mp4`;
-    const audioFile = `audio_${Date.now()}.mp3`;
-    const outputFile = `output_${Date.now()}.mp4`;
-
-    // 2. Proses Download Video dan Audio secara paralel
-    // Menggunakan event 'finish' pada writeStream untuk memastikan file benar-benar tertulis di disk
     await Promise.all([
-      new Promise((resolve, reject) => {
-        ytdl(text, { format: videoFormat })
-          .pipe(fs.createWriteStream(videoFile))
-          .on('finish', resolve)
-          .on('error', reject);
+      new Promise((res, rej) => {
+        videoStream.pipe(fs.createWriteStream(videoFile)).on('finish', res).on('error', rej);
       }),
-      new Promise((resolve, reject) => {
-        ytdl(text, { format: audioFormat })
-          .pipe(fs.createWriteStream(audioFile))
-          .on('finish', resolve)
-          .on('error', reject);
+      new Promise((res, rej) => {
+        audioStream.pipe(fs.createWriteStream(audioFile)).on('finish', res).on('error', rej);
       })
     ]);
 
-    // 3. Proses FFmpeg: Menggabungkan dan Upscale ke 1080p
-    // Ditambahkan flag -y untuk overwrite file jika ada bentrokan
+    await ctx.telegram.editMessageText(ctx.chat.id, status.message_id, null, "⚙️ Biidznillah, sedang menyatukan video dan audio serta meningkatkan kualitas ke 1080p HD...");
+
+    // FFmpeg: Upscale Agresif namun tetap Jernih
     const ffmpeg = spawn('ffmpeg', [
-      '-y', 
+      '-y',
       '-i', videoFile,
       '-i', audioFile,
-      '-vf', 'scale=1920:1080:force_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+      '-vf', 'scale=1920:1080:force_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,unsharp=3:3:1.5', 
       '-c:v', 'libx264',
-      '-preset', 'veryfast', // Mempercepat proses build di server
-      '-crf', '23',           // Keseimbangan antara kualitas dan ukuran file
+      '-preset', 'ultrafast', 
+      '-crf', '20', 
       '-c:a', 'aac',
+      '-b:a', '192k',
       outputFile
     ]);
 
-    await new Promise((resolve, reject) => {
-      ffmpeg.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`FFmpeg keluar dengan kode ${code}`));
-      });
-      ffmpeg.on('error', reject);
+    await new Promise((res, rej) => {
+      ffmpeg.on('close', (code) => code === 0 ? res() : rej(new Error("Gagal dalam proses olah data")));
+      ffmpeg.on('error', rej);
     });
 
-    // 4. Kirim file hasil upscale ke Telegram
-    await ctx.replyWithVideo({ 
-      source: fs.createReadStream(outputFile), 
-      filename: 'video_1080p.mp4' 
-    }, { 
-      supports_streaming: true,
-      caption: `✅ Berhasil di-upscale ke 1080p: ${info.videoDetails.title}`
+    // Pengiriman Video dengan Doa Penutup
+    await ctx.replyWithVideo({ source: outputFile }, {
+      caption: `✅ Alhamdulillah, video Anda telah siap dalam kualitas 1080p.\n\n🎬 Judul: ${info.videoDetails.title}\n\nSemoga menjadi ilmu yang bermanfaat dan membawa keberkahan. Selamat menanti waktu berbuka puasa! ✨`,
+      supports_streaming: true
     });
 
-    // 5. Cleanup: Hapus file sementara dengan aman
-    [videoFile, audioFile, outputFile].forEach(file => {
-      if (fs.existsSync(file)) fs.unlinkSync(file);
+    // Pembersihan aman
+    [videoFile, audioFile, outputFile].forEach(f => {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
     });
 
-  } catch (e) {
-    console.error("Audit Error:", e.message);
-    await ctx.reply(`⚠️ Terjadi kesalahan: ${e.message}`);
-    
-    // Pastikan file sampah terhapus jika gagal
-    if (fs.existsSync(videoFile)) fs.unlinkSync(videoFile);
-    if (fs.existsSync(audioFile)) fs.unlinkSync(audioFile);
+  } catch (err) {
+    console.error("Audit Error:", err.message);
+    ctx.reply("Qadarullah, terjadi kendala teknis dalam memproses video ini. Silakan dicoba kembali beberapa saat lagi. Semoga Allah mudahkan.");
   } finally {
     ctx.deleteMessage(status.message_id).catch(() => {});
   }
 });
 
-bot.launch().then(() => console.log("Bot berjalan dengan akurasi 100%"));
-
-// Penanganan penghentian bot secara halus
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-  
+bot.launch().then(() => console.log("Bot Khidmat Ramadan Aktif!"));
+    
