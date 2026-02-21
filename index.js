@@ -50,7 +50,6 @@ const queue = fastq.promise(async (task) => {
     return downloadAndSend(task.ctx, task.url, task.isAudio, task.isSoundCloud);
 }, 3);
 
-// Auto-Cleaner Storage
 setInterval(() => {
     fs.readdir(tempDir, (err, files) => {
         if (err) return;
@@ -73,6 +72,9 @@ async function downloadAndSend(ctx, url, isAudio = false, isSoundCloud = false) 
         const finalTargetUrl = isSoundCloud ? url : await getRealUrl(url);
 
         let engineConfig = {
+            // --- [FIX KRUSIAL: MENGGUNAKAN BINARY DARI DOCKERFILE] ---
+            binaryPath: '/usr/local/bin/yt-dlp', 
+            
             output: filePath,
             noCheckCertificate: true,
             noPlaylist: true,
@@ -96,15 +98,12 @@ async function downloadAndSend(ctx, url, isAudio = false, isSoundCloud = false) 
             if (isAudio) {
                 await ctx.replyWithAudio({ source: filePath }, { caption: "✅ Berhasil!" });
             } else {
-                // --- [LOGIKA HANYA VIDEO - TANPA DOCUMENT] ---
                 try {
-                    // Coba kirim dengan metadata lengkap
                     await ctx.replyWithVideo({ source: filePath }, { 
                         caption: "✅ Berhasil!", 
                         supports_streaming: true 
                     });
                 } catch (e) {
-                    // Jika gagal (biasanya karena thumbnail), paksa kirim video polosan tanpa opsi tambahan
                     await ctx.replyWithVideo({ source: filePath });
                 }
             }
@@ -112,7 +111,7 @@ async function downloadAndSend(ctx, url, isAudio = false, isSoundCloud = false) 
         }
     } catch (error) {
         console.error("Engine Error:", error.message);
-        await ctx.reply("❌ Gagal mengirim video.");
+        await ctx.reply("❌ Gagal mengirim media.");
     } finally {
         ctx.deleteMessage(statusMsg.message_id).catch(() => {});
     }
@@ -135,16 +134,5 @@ bot.on('text', async (ctx) => {
     if (matchKeyword) {
         const query = msg.slice(matchKeyword.length).trim();
         ctx.reply(`🔎 Mencari "${query}"...`);
-        queue.push({ ctx, url: query, isAudio: true, isSoundCloud: true });
-        return;
-    }
-
-    if (msg === '/start') {
-        ctx.reply("🔥 Luna Engine v4.6 Agresif Aktif!\n\n• Mode: Only Video (No Document)\n• Audit RAM: 1 Menit");
-    }
-});
-
-http.createServer((req, res) => { res.writeHead(200); res.end('Healthy'); }).listen(process.env.PORT || 8000);
-
-bot.launch({ dropPendingUpdates: true }).then(() => console.log("🚀 ENGINE ONLINE - VIDEO ONLY MODE"));
+        queue.push({ ctx, url: query, isAudio:
         
