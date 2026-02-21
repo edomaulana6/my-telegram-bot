@@ -1,18 +1,11 @@
 {
-  "name": "my-telegram-bot",
-  "version": "1.0.0",
-  "description": "YouTube Downloader with Upscale 1080p",
+  "name": "yt-downloader-ramadan-1080p",
+  "version": "1.2.0",
+  "description": "Bot Download YouTube Upscale 1080p Edisi Khidmat Ramadan",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [
-    "telegram",
-    "bot",
-    "ytdl",
-    "upscale"
-  ],
   "author": "Edo Maulana",
   "license": "ISC",
   "dependencies": {
