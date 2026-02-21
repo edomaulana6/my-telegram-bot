@@ -2,10 +2,18 @@ const { Telegraf } = require('telegraf');
 const ytdl = require('ytdl-core');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const http = require('http'); // Tambahan untuk Health Check
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Pesan Selamat Datang yang Islami dan Santun
+// --- TAMBAHAN UNTUK KOYEB HEALTH CHECK ---
+// Membuat server dummy agar Koyeb tidak mematikan bot secara paksa
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("Alhamdulillah, Bot Ramadan Aktif.");
+}).listen(process.env.PORT || 8000);
+// ------------------------------------------
+
 bot.start((ctx) => {
   ctx.reply(
     "Assalamu'alaikum Warahmatullahi Wabarakatuh ✨\n\n" +
@@ -48,7 +56,6 @@ bot.on('text', async (ctx) => {
 
     await ctx.telegram.editMessageText(ctx.chat.id, status.message_id, null, "⚙️ Biidznillah, sedang menyatukan video dan audio serta meningkatkan kualitas ke 1080p HD...");
 
-    // FFmpeg: Upscale Agresif namun tetap Jernih
     const ffmpeg = spawn('ffmpeg', [
       '-y',
       '-i', videoFile,
@@ -67,13 +74,11 @@ bot.on('text', async (ctx) => {
       ffmpeg.on('error', rej);
     });
 
-    // Pengiriman Video dengan Doa Penutup
     await ctx.replyWithVideo({ source: outputFile }, {
       caption: `✅ Alhamdulillah, video Anda telah siap dalam kualitas 1080p.\n\n🎬 Judul: ${info.videoDetails.title}\n\nSemoga menjadi ilmu yang bermanfaat dan membawa keberkahan. Selamat menanti waktu berbuka puasa! ✨`,
       supports_streaming: true
     });
 
-    // Pembersihan aman
     [videoFile, audioFile, outputFile].forEach(f => {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
@@ -86,5 +91,14 @@ bot.on('text', async (ctx) => {
   }
 });
 
-bot.launch().then(() => console.log("Bot Khidmat Ramadan Aktif!"));
-    
+// Jalankan bot dengan proteksi error koneksi (ECONNRESET)
+bot.launch().then(() => {
+    console.log("Alhamdulillah, Bot Khidmat Ramadan Aktif!");
+}).catch((err) => {
+    console.error("Gagal koneksi ke Telegram, mencoba ulang dalam 5 detik...", err.message);
+    setTimeout(() => bot.launch(), 5000); 
+});
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  
