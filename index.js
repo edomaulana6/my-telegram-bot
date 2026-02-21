@@ -1,70 +1,75 @@
-// Luna Engine v7.5 - Multi-Platform Detection
 const { Telegraf } = require('telegraf');
-const ytdl = require('@distube/ytdl-core'); 
+const ytdl = require('ytdl-core');
 const axios = require('axios');
-const http = require('http');
-const fastq = require('fastq');
-
+const fs = require('fs');
+const { spawn } = require('child_process');
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const API_KEY = process.env.GOOGLE_API_KEY;
 
-// 🛡️ RESET RAM 1 MENIT (Wajib)
-setInterval(() => {
-    if (global.gc) global.gc();
-    console.log(`📊 [CLEANUP] RAM: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`);
-}, 60000);
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+  if (!ytdl.validateURL(text)) {
+    return ctx.reply("⚠️ Maaf, hanya link YouTube yang didukung.");
+  }
 
-const queue = fastq.promise(async (task) => {
-    const { ctx, text } = task;
-    
-    // 1. DETEKSI PLATFORM (Audit Awal)
-    const isYoutube = ytdl.validateURL(text) || !text.includes('http');
-    const isTiktok = text.includes('tiktok.com');
-    const isFB = text.includes('facebook.com') || text.includes('fb.watch');
-
-    if (!isYoutube) {
-        return ctx.reply("⚠️ Maaf, saat ini Luna Engine difokuskan 100% untuk YouTube saja agar stabil.");
+  const status = await ctx.reply("🔎 Mendownload...");
+  try {
+    const info = await ytdl.getInfo(text);
+    const format = ytdl.chooseFormat(info.formats, { quality: 'highestvideo', filter: 'videoonly' });
+    if (!format) {
+      return ctx.reply("⚠️ Tidak ada format video yang sesuai.");
     }
 
-    const status = await ctx.reply("🔎 Mencari di YouTube...");
-    
-    try {
-        let videoUrl = text;
-        const isAudio = text.toLowerCase().includes('lagu') || text.toLowerCase().includes('play');
-        const cleanQuery = text.replace(/lagu|play/gi, '').trim();
+    const videoStream = ytdl.downloadFromInfo(info, { format: format });
+    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
+    const audioStream = ytdl.downloadFromInfo(info, { format: audioFormat });
 
-        // 2. LOGIKA PENCARIAN (Jika bukan link)
-        if (!ytdl.validateURL(cleanQuery)) {
-            const search = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(cleanQuery)}&type=video&maxResults=1&key=${API_KEY}`);
-            if (!search.data.items.length) return ctx.reply("❌ Judul tersebut tidak ditemukan di YouTube.");
-            videoUrl = `https://www.youtube.com/watch?v=${search.data.items[0].id.videoId}`;
-        }
+    // Simpan video dan audio ke file sementara
+    const videoFile = 'video.mp4';
+    const audioFile = 'audio.mp3';
+    const outputFile = 'output.mp4';
 
-        // 3. PROSES STREAM
-        const stream = ytdl(videoUrl, {
-            quality: isAudio ? 'highestaudio' : 'highestvideo',
-            filter: isAudio ? 'audioonly' : 'videoandaudio'
-        });
+    videoStream.pipe(fs.createWriteStream(videoFile));
+    audioStream.pipe(fs.createWriteStream(audioFile));
 
-        if (isAudio) {
-            await ctx.replyWithAudio({ source: stream, filename: 'audio.mp3' });
-        } else {
-            await ctx.replyWithVideo({ source: stream, filename: 'video.mp4' }, { supports_streaming: true });
-        }
-        stream.destroy();
-    } catch (e) {
-        console.error("Error Detail:", e.message);
-        await ctx.reply("⚠️ YouTube membatasi akses. Coba ganti judul atau gunakan link YouTube langsung.");
-    } finally {
-        ctx.deleteMessage(status.message_id).catch(() => {});
-    }
-}, 2);
+    // Tunggu sampai video dan audio selesai diunduh
+    await new Promise((resolve, reject) => {
+      videoStream.on('end', resolve);
+      videoStream.on('error', reject);
+    });
+    await new Promise((resolve, reject) => {
+      audioStream.on('end', resolve);
+      audioStream.on('error', reject);
+    });
 
-bot.on('text', (ctx) => {
-    if (ctx.message.text.startsWith('/')) return;
-    queue.push({ ctx, text: ctx.message.text });
+    // Gunakan FFmpeg untuk meng upscale video ke 1080p dan menggabungkan dengan audio
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', videoFile,
+      '-i', audioFile,
+      '-vf', 'scale=1920:1080:force_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
+      '-c:v', 'libx264',
+      '-crf', '18',
+      '-c:a', 'aac',
+      outputFile
+    ]);
+
+    await new Promise((resolve, reject) => {
+      ffmpeg.on('close', resolve);
+      ffmpeg.on('error', reject);
+    });
+
+    // Kirim file output
+    await ctx.replyWithVideo({ source: fs.createReadStream(outputFile), filename: 'video.mp4' }, { supports_streaming: true });
+
+    // Hapus file sementara
+    fs.unlinkSync(videoFile);
+    fs.unlinkSync(audioFile);
+    fs.unlinkSync(outputFile);
+  } catch (e) {
+    console.error("Error:", e.message);
+    await ctx.reply("⚠️ Gagal mendownload video.");
+  } finally {
+    ctx.deleteMessage(status.message_id).catch(() => {});
+  }
 });
 
-http.createServer((req, res) => res.end('STABLE')).listen(process.env.PORT || 8000);
 bot.launch();
-        
