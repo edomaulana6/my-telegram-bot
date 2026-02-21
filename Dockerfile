@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 3000
 
 # Jalankan aplikasi
-CMD
+CMD ["node", "index.js"]
