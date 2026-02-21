@@ -1,95 +1,74 @@
-// -*- coding: utf-8 -*-
+// Luna Engine Ultra v7.0 - Official API Mode
 const { Telegraf } = require('telegraf');
-const { message } = require('telegraf/filters');
 const ytdl = require('@distube/ytdl-core'); 
-const yts = require('yt-search');
-const fastq = require('fastq');
+const axios = require('axios');
 const http = require('http');
+const fastq = require('fastq');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const bot = new Telegraf(BOT_TOKEN);
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const API_KEY = process.env.GOOGLE_API_KEY;
 
-/**
- * 🛡️ SISTEM RESET RAM OTOMATIS (SETIAP 1 MENIT)
- * Standar Ketelitian 100% untuk menjaga uptime di Koyeb.
- */
+// 🛡️ SISTEM RESET RAM OTOMATIS (PER 1 MENIT)
 setInterval(() => {
-    if (global.gc) {
-        global.gc(); // Bersihkan RAM secara paksa setiap menit
-    }
-    const usage = process.memoryUsage().rss / 1024 / 1024;
-    console.log(`📊 [RESET RAM 1 MENIT] Status: Clean | RAM: ${Math.round(usage)}MB`);
+    if (global.gc) global.gc(); // Memicu pembuangan sampah memori
+    const usage = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    console.log(`📊 [SYSTEM] RAM Audit: ${usage}MB | Status: Healthy`);
 }, 60000);
 
-// --- QUEUE SYSTEM ---
+// Antrean Proses (Agar tidak overload)
 const queue = fastq.promise(async (task) => {
-    return engineBypass(task.ctx, task.url, task.isAudio);
-}, 2);
-
-async function engineBypass(ctx, url, isAudio = false) {
-    const status = await ctx.reply(isAudio ? "🎵 Menyiapkan Audio (Public Stream)..." : "🎬 Menyiapkan Video (Public Stream)...");
+    const { ctx, query } = task;
+    const isAudio = query.toLowerCase().includes('lagu') || query.toLowerCase().includes('play');
+    const cleanQuery = query.replace(/lagu|play/gi, '').trim();
+    
+    const status = await ctx.reply(isAudio ? "🎵 Menyiapkan Audio..." : "🎬 Menyiapkan Video...");
     
     try {
-        let finalUrl = url;
+        let videoUrl = cleanQuery;
 
-        // Pencarian murni via YouTube Web (Bukan YT Music)
-        if (!ytdl.validateURL(url)) {
-            const search = await yts(url);
-            if (!search.videos.length) return ctx.reply("❌ Tidak ditemukan.");
-            finalUrl = search.videos[0].url;
+        // Jika bukan link, cari lewat API Resmi yang Anda berikan
+        if (!ytdl.validateURL(cleanQuery)) {
+            const search = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(cleanQuery)}&type=video&maxResults=1&key=${API_KEY}`);
+            if (!search.data.items.length) return ctx.reply("❌ Konten tidak ditemukan.");
+            videoUrl = `https://www.youtube.com/watch?v=${search.data.items[0].id.videoId}`;
         }
 
-        // Menggunakan filter 'Guest' agar tidak meminta cookies
-        const info = await ytdl.getInfo(finalUrl);
+        const info = await ytdl.getInfo(videoUrl);
         const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
         
-        const stream = ytdl(finalUrl, {
+        const stream = ytdl(videoUrl, {
             quality: isAudio ? 'highestaudio' : 'highestvideo',
             filter: isAudio ? 'audioonly' : 'videoandaudio',
-            // Hard-code untuk menghindari pemanggilan YT Music API
             requestOptions: {
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'com.google.android.youtube/19.05.36 (Linux; U; Android 14)',
+                    'X-YouTube-Client-Name': '3',
+                    'X-YouTube-Client-Version': '19.05.36'
                 }
             }
         });
 
-        const meta = { source: stream, filename: `${title}.${isAudio ? 'mp3' : 'mp4'}` };
-        const caption = `✅ **${title}**\n\nMode: No-Cookies Public Stream`;
-
         if (isAudio) {
-            await ctx.replyWithAudio(meta, { caption, parse_mode: 'Markdown' });
+            await ctx.replyWithAudio({ source: stream, filename: `${title}.mp3` }, { caption: `✅ **${title}**` });
         } else {
-            await ctx.replyWithVideo(meta, { caption, parse_mode: 'Markdown', supports_streaming: true });
+            await ctx.replyWithVideo({ source: stream, filename: `${title}.mp4` }, { caption: `✅ **${title}**`, supports_streaming: true });
         }
-
-        // Hancurkan stream segera setelah selesai agar RAM tidak tersisa
-        stream.destroy();
+        
+        stream.destroy(); // Langsung bersihkan memori stream
     } catch (e) {
-        console.error("Engine Error:", e.message);
-        await ctx.reply("❌ Gagal mengambil data. Platform sedang memperketat akses publik.");
+        console.error(e);
+        await ctx.reply("⚠️ Gagal memproses. Pastikan API Key aktif.");
     } finally {
         ctx.deleteMessage(status.message_id).catch(() => {});
     }
-}
+}, 2);
 
-// --- HANDLER ---
-bot.on(message('text'), async (ctx) => {
-    const text = ctx.message.text.trim();
-    if (text.startsWith('/')) return;
-
-    const isUrl = /https?:\/\/\S+/gi.test(text);
-    // Jika ada kata kunci 'lagu' atau 'mp3', otomatis mode audio
-    const wantAudio = text.toLowerCase().includes('lagu') || text.toLowerCase().endsWith('mp3');
-
-    queue.push({ 
-        ctx, 
-        url: text.toLowerCase().replace('lagu', '').trim(), 
-        isAudio: wantAudio 
-    });
+bot.on('text', (ctx) => {
+    if (ctx.message.text.startsWith('/')) return;
+    queue.push({ ctx, query: ctx.message.text });
 });
 
-// KOYEB HEALTH CHECK (Port 8000)
-http.createServer((req, res) => { res.writeHead(200); res.end('OK'); }).listen(process.env.PORT || 8000);
+// Health Check untuk Koyeb
+http.createServer((req, res) => res.end('LUNA_ONLINE')).listen(process.env.PORT || 8000);
 bot.launch({ dropPendingUpdates: true });
-                            
+        
