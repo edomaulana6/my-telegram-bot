@@ -1,5 +1,5 @@
 const { Bot, InputFile } = require("grammy");
-const { execa } = require("execa");
+const { execa } = require("execa"); // Pastikan menggunakan kurung kurawal
 const fs = require("fs-extra");
 const path = require("path");
 const http = require("http");
