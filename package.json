@@ -1,14 +1,17 @@
 {
   "name": "ramadan-hd-bot",
-  "version": "1.0.0",
-  "description": "Bot Universal Downloader & Upscale Ramadan",
+  "version": "1.1.0",
+  "description": "Bot Ramadan Downloader & Upscale menggunakan yt-dlp",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "telegraf": "^4.15.0",
-    "http": "^0.0.1-security"
+    "telegraf": "^4.16.3",
+    "axios": "^1.6.7",
+    "path": "^0.12.7"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
