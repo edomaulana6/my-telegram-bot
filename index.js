@@ -4,15 +4,19 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
+// Inisialisasi Bot dengan Token dari Environment Variable
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Server dummy untuk Koyeb
+// Server dummy agar Koyeb tetap 'Healthy' (Port 8000)
 http.createServer((req, res) => {
   res.writeHead(200);
-  res.end("Bot Ramadan Aktif 🌙");
+  res.end("Bot Ramadan Real-time Aktif 🌙");
 }).listen(process.env.PORT || 8000, '0.0.0.0');
 
-// Fungsi Progress Bar Ramadan
+/**
+ * Fungsi Progress Bar Unik Ramadan
+ * Menghasilkan visualisasi bulan yang menutupi awan secara bertahap
+ */
 function makeProgressBar(percent) {
   const size = 10;
   const progress = Math.round((size * percent) / 100);
@@ -23,7 +27,12 @@ function makeProgressBar(percent) {
 }
 
 bot.start((ctx) => {
-  ctx.replyWithMarkdown("✨ *Assalamu'alaikum!* ✨\n\nKirim link video, saya akan download via *yt-dlp* dan upscale ke *1080p HD* secara real-time. 🙏");
+  ctx.replyWithMarkdown(
+    "✨ *Assalamu'alaikum Warahmatullahi Wabarakatuh* ✨\n\n" +
+    "Selamat datang di **Bot Berkah Ramadan**.\n" +
+    "Saya siap mengunduh & menjernihkan video Anda secara real-time.\n\n" +
+    "🙏 *Silakan kirimkan link video (TikTok/YT/IG/FB).*"
+  );
 });
 
 bot.on('text', async (ctx) => {
@@ -36,10 +45,12 @@ bot.on('text', async (ctx) => {
   const outPath = path.join(__dirname, `hd_${timestamp}.mp4`);
 
   try {
-    // 1. TAHAP DOWNLOAD (yt-dlp)
+    // 1. TAHAP DOWNLOAD (yt-dlp dengan Output Real-time)
     const ytdlp = spawn('yt-dlp', [
-      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+      '-f', 'best[ext=mp4]/best',
       '--newline',
+      '--progress',
+      '--force-overwrites',
       '-o', rawPath,
       url
     ]);
@@ -48,13 +59,15 @@ bot.on('text', async (ctx) => {
 
     ytdlp.stdout.on('data', (data) => {
       const output = data.toString();
+      // Menangkap angka persentase (Contoh: 45.2%)
       const match = output.match(/(\d+\.\d+)%/);
       
       if (match) {
         const percent = parseFloat(match[1]);
         const now = Date.now();
-        // Update setiap 3 detik agar aman dari limit Telegram
-        if (now - lastUpdate > 3000) {
+        
+        // Update setiap 2.5 detik untuk menghindari rate-limit Telegram
+        if (now - lastUpdate > 2500) {
           const bar = makeProgressBar(percent);
           ctx.telegram.editMessageText(
             ctx.chat.id, 
@@ -62,7 +75,7 @@ bot.on('text', async (ctx) => {
             null, 
             `📥 *Sedang Mengunduh...*\n\n${bar}\n\n_Mohon bersabar, sedang menjemput berkah._ 🙏`,
             { parse_mode: 'Markdown' }
-          ).catch(() => {});
+          ).catch(() => {}); // Mengabaikan error jika konten pesan sama
           lastUpdate = now;
         }
       }
@@ -73,14 +86,16 @@ bot.on('text', async (ctx) => {
       ytdlp.on('error', reject);
     });
 
-    // 2. TAHAP UPSCALE (FFmpeg)
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "⚙️ *Proses Penjernihan HD...*\n\n🪔 Sedang melakukan upscale ke 1080p...");
+    // 2. TAHAP UPSCALE (FFmpeg - Konfigurasi Paling Ringan & Stabil)
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "⚙️ *Proses Penjernihan...*\n\n🪔 Sedang mengoptimasi visual agar lebih jernih.");
 
     const ffmpeg = spawn('ffmpeg', [
       '-y', '-i', rawPath,
-      '-vf', 'scale=1920:1080:force_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,unsharp=3:3:1.2',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-      '-c:a', 'aac', '-b:a', '128k',
+      '-vf', 'scale=1280:720:force_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2',
+      '-c:v', 'libx264', 
+      '-preset', 'superfast', 
+      '-crf', '26', 
+      '-c:a', 'copy', // Menghemat CPU dengan menyalin audio tanpa encode ulang
       outPath
     ]);
 
@@ -91,20 +106,25 @@ bot.on('text', async (ctx) => {
 
     // 3. TAHAP PENGIRIMAN
     await ctx.replyWithVideo({ source: outPath }, {
-      caption: `✅ *Alhamdulillah, Video Selesai!*\n\nBerhasil di-upscale ke 1080p via yt-dlp. Semoga bermanfaat! ✨`,
+      caption: `✅ *Alhamdulillah, Video Selesai!*\n\nKualitas telah dioptimalkan (720p HD). Semoga bermanfaat! ✨`,
       parse_mode: 'Markdown',
       supports_streaming: true
     });
 
   } catch (err) {
     console.error("ANALISA TEKNIS:", err.message);
-    ctx.reply("Afwan, terjadi kendala teknis. Pastikan link video valid. 🙏");
+    ctx.reply("Afwan, video gagal diproses. Pastikan link publik dan durasi tidak terlalu panjang. 🙏");
   } finally {
-    // 4. PEMBERSIHAN (Reset Memori)
+    // 4. PEMBERSIHAN MUTLAK (Reset Memori/Storage)
     ctx.deleteMessage(statusMsg.message_id).catch(() => {});
     if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
     if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
   }
 });
 
-bot.launch().then(() => console.log("Bot Ramadan Real-time Aktif!"));
+bot.launch().then(() => console.log("Bot Ramadan Real-time Berjalan Stabil."));
+
+// Graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    
