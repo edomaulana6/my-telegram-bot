@@ -1,25 +1,16 @@
-# Gunakan Alpine Linux sebagai base image paling ringan di dunia (Hanya ~5MB)
-FROM node:18-alpine
+FROM python:3.10-slim
 
-# Install dependencies sistem (FFmpeg dan Python3)
-# --no-cache memastikan tidak ada file sampah installer yang tersisa di image
-RUN apk add --no-cache \
-    ffmpeg \
-    python3 \
-    py3-pip \
-    && pip3 install --no-cache-dir --break-system-packages yt-dlp
+# Instal ffmpeg (wajib untuk yt-dlp menggabung audio/video)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Tentukan direktori kerja di dalam kontainer
 WORKDIR /app
 
-# Salin package.json terlebih dahulu untuk efisiensi caching layer Docker
-COPY package*.json ./
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install hanya library produksi (menghindari devDependencies yang berat)
-RUN npm install --production
-
-# Salin seluruh kode (bot.js, dll) ke dalam kontainer
 COPY . .
 
-# Jalankan bot menggunakan node
-CMD ["node", "bot.js"]
+# Koyeb butuh port terbuka agar statusnya "Healthy"
+EXPOSE 8080
+
+CMD ["python", "bot.py"]
