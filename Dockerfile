@@ -1,16 +1,24 @@
-FROM node:20-bullseye
+# Menggunakan Node.js versi LTS yang stabil
+FROM node:18-slim
 
-# Instalasi FFmpeg terbaru untuk video jernih & bersuara
+# Install FFmpeg dan dependencies sistem
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Set direktori kerja
 WORKDIR /app
+
+# Copy package.json dan install library
 COPY package*.json ./
 RUN npm install --production
+
+# Copy seluruh kode sumber
 COPY . .
 
-# Buka port 8000 untuk Health Check Koyeb
+# Port sesuai dengan yang ada di kode Node.js (8000)
 EXPOSE 8000
 
+# Jalankan bot
 CMD ["node", "index.js"]
