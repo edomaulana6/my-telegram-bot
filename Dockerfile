@@ -1,72 +1,35 @@
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+# Menggunakan Node.js versi 18 slim sebagai base
+FROM node:18-slim
 
-// Fungsi untuk membuat progress bar unik
-function makeProgressBar(percent) {
-  const size = 10;
-  const progress = Math.round((size * percent) / 100);
-  const emptyProgress = size - progress;
-  const filled = "🌙".repeat(progress); // Karakter unik saat jalan
-  const empty = "☁️".repeat(emptyProgress); // Karakter sisa
-  return `[${filled}${empty}] ${percent}%`;
-}
+# Install dependencies sistem yang diperlukan
+# Python3 & Pip untuk yt-dlp, FFmpeg untuk pengolahan video
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-full \
+    ffmpeg \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-bot.on('text', async (ctx) => {
-  const url = ctx.message.text;
-  if (!url.startsWith('http')) return;
+# Install yt-dlp secara resmi melalui github release
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp
 
-  const statusMsg = await ctx.reply("✨ *Bismillah...*\n\n☁️☁️☁️☁️☁️☁️☁️☁️☁️☁️ 0%", { parse_mode: 'Markdown' });
-  const timestamp = Date.now();
-  const rawPath = path.join(__dirname, `raw_${timestamp}.mp4`);
+# Set direktori kerja di dalam container
+WORKDIR /app
 
-  try {
-    const ytdlp = spawn('yt-dlp', [
-      '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
-      '--newline', // Wajib agar progress bisa dibaca per baris
-      '-o', rawPath,
-      url
-    ]);
+# Copy daftar library terlebih dahulu (untuk optimasi cache)
+COPY package*.json ./
 
-    let lastUpdate = 0;
+# Install hanya library produksi (hemat space)
+RUN npm install --production
 
-    ytdlp.stdout.on('data', (data) => {
-      const output = data.toString();
-      // Mencari pola persentase dari output yt-dlp (contoh: [download]  45.0% of 10.00MiB)
-      const match = output.match(/(\d+\.\d+)%/);
-      
-      if (match) {
-        const percent = parseFloat(match[1]);
-        const now = Date.now();
-        
-        // Update setiap 2 detik agar tidak kena spam limit Telegram (PENTING!)
-        if (now - lastUpdate > 2000) {
-          const bar = makeProgressBar(percent);
-          ctx.telegram.editMessageText(
-            ctx.chat.id, 
-            statusMsg.message_id, 
-            null, 
-            `✨ *Sedang Mengunduh...*\n\n${bar}\n\nMohon bersabar, sedang menjemput berkah. 🙏`,
-            { parse_mode: 'Markdown' }
-          ).catch(() => {}); // Abaikan error jika pesan sama
-          lastUpdate = now;
-        }
-      }
-    });
+# Copy seluruh file project ke dalam container
+COPY . .
 
-    await new Promise((resolve, reject) => {
-      ytdlp.on('close', (code) => code === 0 ? resolve() : reject(new Error("Gagal")));
-      ytdlp.on('error', reject);
-    });
+# Expose port untuk Health Check Koyeb (Default 8000)
+EXPOSE 8000
 
-    // Lanjut ke proses FFmpeg seperti biasa...
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "⚙️ *Hampir Selesai...* Sedang memperindah kualitas (Upscale).");
-    
-    // ... (Logika FFmpeg dan Kirim Video)
-
-  } catch (err) {
-    ctx.reply("Afwan, terjadi kendala teknis. 🙏");
-  } finally {
-    if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
-  }
-});
+# Perintah menjalankan bot
+CMD ["node", "index.js"]
