@@ -1,121 +1,104 @@
-const { Telegraf, Input } = require('telegraf');
+const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 
-// Inisialisasi Bot
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// Konfigurasi Token & Port
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const PORT = process.env.PORT || 8000;
 
-// Server Monitoring (Koyeb/PaaS Health Check)
+if (!BOT_TOKEN) throw new Error("BOT_TOKEN tidak ditemukan di Environment Variables!");
+
+const bot = new Telegraf(BOT_TOKEN);
+
+// Server Monitoring (Agar Koyeb tetap 'Healthy')
 http.createServer((req, res) => {
   res.writeHead(200);
-  res.end("Bot Pelayan Ramadan Aktif 🌙");
-}).listen(process.env.PORT || 8000, '0.0.0.0');
+  res.end("Layanan Bot Ramadan Aktif 🌙");
+}).listen(PORT, '0.0.0.0');
 
-/**
- * Fungsi Helper untuk menghapus file secara aman
- * Mencegah penumpukan storage (Memory Reset Logic)
- */
-const cleanupFiles = (...files) => {
-  files.forEach(file => {
-    if (file && fs.existsSync(file)) {
-      try {
-        fs.unlinkSync(file);
-      } catch (e) {
-        console.error(`Gagal menghapus file: ${file}`, e);
-      }
-    }
-  });
+// Fungsi Pembersihan File (Reset Memory Sederhana)
+const hapusFile = (filePath) => {
+  if (fs.existsSync(filePath)) {
+    fs.unlink(filePath, (err) => {
+      if (err) console.error(`Gagal menghapus cache: ${err.message}`);
+    });
+  }
 };
 
-// Command Start - Tema Ramadan
 bot.start((ctx) => {
-  const pesan = `
-✨ *Assalamu'alaikum Warahmatullahi Wabarakatuh* ✨
-
-Selamat datang di **Bot Berkah Ramadan**. 🌙
-Saya siap membantu Anda mengunduh & menjernihkan video (Upscale 1080p) untuk syiar kebaikan.
-
-*Layanan Support:*
-• TikTok (No Watermark)
-• YouTube, Instagram, FB, Twitter/X
-
-Silakan kirimkan link video yang ingin diproses. 🙏
-  `;
-  ctx.replyWithMarkdown(pesan);
+  ctx.replyWithMarkdown(
+    "✨ *Assalamu'alaikum Warahmatullahi Wabarakatuh* ✨\n\n" +
+    "Selamat datang di **Bot Berkah Ramadan**. Saya akan membantu Anda mengunduh video " +
+    "dan melakukan *upscale* ke HD 1080p untuk keperluan syiar kebaikan.\n\n" +
+    "🙏 *Silakan kirimkan link video Anda (YT/IG/TikTok/FB).*"
+  );
 });
 
 bot.on('text', async (ctx) => {
   const url = ctx.message.text;
   if (!url.startsWith('http')) return;
 
+  const status = await ctx.reply("🌙 *Bismillah*, sedang memproses tautan...");
   const timestamp = Date.now();
-  const rawFile = path.join(__dirname, `temp_raw_${timestamp}.mp4`);
-  const outputFile = path.join(__dirname, `ramadan_hd_${timestamp}.mp4`);
-  
-  let statusMsg;
-  
+  const rawPath = path.join(__dirname, `raw_${timestamp}.mp4`);
+  const outPath = path.join(__dirname, `hd_${timestamp}.mp4`);
+
   try {
-    statusMsg = await ctx.reply("🔍 *Bismillah*, sedang memverifikasi tautan...");
+    // 1. Fetching Data dari API Universal
+    const response = await axios.get(`https://api.vreden.my.id/api/download/allinone?url=${encodeURIComponent(url)}`);
+    const data = response.data?.result;
 
-    // 1. Ekstraksi Data API
-    const { data } = await axios.get(`https://api.vreden.my.id/api/download/allinone?url=${encodeURIComponent(url)}`);
+    if (!data) throw new Error("Data video tidak ditemukan.");
+
+    const downloadUrl = data.url || data.video || (data.medias && data.medias[0].url);
     
-    if (!data?.result) throw new Error("Data tidak ditemukan");
+    await ctx.telegram.editMessageText(ctx.chat.id, status.message_id, null, "📥 *Mengunduh file asli...*");
 
-    const videoUrl = data.result.url || data.result.video || data.result.medias?.[0]?.url;
-    if (!videoUrl) throw new Error("URL Video tidak valid");
+    // 2. Download Proses (Stream)
+    const writer = fs.createWriteStream(rawPath);
+    const videoStream = await axios({ url: downloadUrl, method: 'GET', responseType: 'stream' });
+    videoStream.data.pipe(writer);
 
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "📥 *Menjemput Berkah...* Sedang mengunduh file asli.");
-
-    // 2. Download Stream
-    const writer = fs.createWriteStream(rawFile);
-    const stream = await axios({ url: videoUrl, method: 'GET', responseType: 'stream' });
-    stream.data.pipe(writer);
-
-    await new Promise((res, rej) => {
-      writer.on('finish', res);
-      writer.on('error', rej);
+    await new Promise((resolve, reject) => {
+      writer.on('finish', resolve);
+      writer.on('error', reject);
     });
 
-    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, "⚙️ *Proses Upscale 1080p HD...*\nMohon bersabar, sedang memperindah kualitas video.");
+    await ctx.telegram.editMessageText(ctx.chat.id, status.message_id, null, "⚙️ *Proses Upscale 1080p & Penjernihan Suara...*");
 
-    // 3. FFmpeg Processing (Optimization)
-    // Menggunakan preset 'fast' agar tidak terlalu lama namun hasil tetap tajam
+    // 3. FFmpeg Processing (Optimasi Presisi)
     const ffmpeg = spawn('ffmpeg', [
-      '-y', '-i', rawFile,
-      '-vf', 'scale=1280:720:force_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,unsharp=5:5:1.0:5:5:0.0',
-      '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
-      '-c:a', 'aac', '-b:a', '128k',
-      outputFile
+      '-y', '-i', rawPath,
+      '-vf', 'scale=1920:1080:force_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,unsharp=3:3:1.2',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20',
+      '-c:a', 'aac', '-b:a', '192k',
+      outPath
     ]);
 
     await new Promise((res, rej) => {
-      ffmpeg.on('close', (code) => code === 0 ? res() : rej(new Error("FFmpeg Error")));
+      ffmpeg.on('close', (code) => code === 0 ? res() : rej(new Error("Gagal Upscale")));
       ffmpeg.on('error', rej);
     });
 
-    // 4. Kirim Hasil
-    await ctx.replyWithVideo({ source: outputFile }, {
-      caption: `✅ *Alhamdulillah!* Video telah berhasil di-upscale.\n\nSemoga menjadi wasilah kebaikan di bulan suci ini. ✨`,
+    // 4. Pengiriman Hasil
+    await ctx.replyWithVideo({ source: outPath }, {
+      caption: "✅ *Alhamdulillah, Video Berhasil Diproses!*\n\nSemoga menjadi wasilah kebaikan di bulan suci ini. ✨",
       parse_mode: 'Markdown'
     });
 
   } catch (err) {
-    console.error("ANALYSIS ERROR:", err.message);
-    ctx.reply("Afwan, terjadi kendala teknis saat memproses video. Pastikan link tidak diprivasi. 🙏");
+    console.error("ANALISA ERROR:", err.message);
+    ctx.reply("Afwan, bot mengalami kendala teknis. Pastikan link publik dan coba kembali. 🙏");
   } finally {
-    // 5. Pembersihan Mutlak (Anti-Halusinasi & Storage Management)
-    if (statusMsg) ctx.deleteMessage(statusMsg.message_id).catch(() => {});
-    cleanupFiles(rawFile, outputFile);
+    // Menghapus pesan status & file sampah (Cleanup 100% Akurat)
+    ctx.deleteMessage(status.message_id).catch(() => {});
+    hapusFile(rawPath);
+    hapusFile(outPath);
   }
 });
 
-bot.launch().then(() => console.log("Bot Ramadan Berjalan Akurat 100%"));
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-    
+bot.launch().then(() => console.log("Bot Ramadan Berjalan Stabil."));
+        
