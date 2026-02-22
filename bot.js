@@ -3,40 +3,53 @@ const { execa } = require("execa");
 const fs = require("fs");
 const path = require("path");
 
-const bot = new Bot("TOKEN_ANDA");
+// Mengambil token dari Environment Variables Koyeb
+// Menambahkan pembersihan otomatis terhadap karakter spasi atau kutip yang tidak sengaja terbawa
+const token = process.env.BOT_TOKEN ? process.env.BOT_TOKEN.replace(/['"]+/g, '').trim() : null;
 
-bot.command("start", (ctx) => ctx.reply("Assalamu'alaikum. Silakan kirim link video. Bismillah."));
+if (!token) {
+    console.error("Kesalahan Fatal: BOT_TOKEN tidak ditemukan di Environment Variables!");
+    process.exit(1);
+}
+
+const bot = new Bot(token);
+
+bot.command("start", (ctx) => {
+    ctx.reply("Bismillah. Assalamu'alaikum! Bot sudah aktif melalui Environment Variables. Silakan kirim link video. 🌙");
+});
 
 bot.on("message:text", async (ctx) => {
     const url = ctx.message.text;
-    const fileId = `${ctx.from.id}_${Date.now()}`;
+    if (!url.startsWith("http")) return;
+
+    const fileId = `vid_${ctx.from.id}_${Date.now()}`;
     const output = path.join(__dirname, `${fileId}.mp4`);
     
-    const status = await ctx.reply("Bismillah, memproses... 🌙");
-
+    let status;
     try {
-        // Eksekusi yt-dlp + FFmpeg dalam satu aliran (Pipe) jika memungkinkan, 
-        // tapi untuk kestabilan 720p, kita gunakan perintah langsung yang efisien:
+        status = await ctx.reply("Bismillah, sedang memproses... 🌙");
+
         await execa("yt-dlp", [
             url,
-            "-f", "mp4[height<=720]/best[height<=720]", // Langsung ambil 720p dari sumber (lebih ringan drpd convert)
+            "-f", "mp4[height<=720]/best[height<=720]",
             "--no-playlist",
-            "--merge-output-format", "mp4",
             "-o", output
         ]);
 
-        await ctx.replyWithVideo(new InputFile(output), {
-            caption: "Alhamdulillah, selesai. 🌙"
-        });
-
+        if (fs.existsSync(output)) {
+            await ctx.replyWithVideo(new InputFile(output), {
+                caption: "Alhamdulillah, video berhasil diunduh. ✨"
+            });
+        }
     } catch (e) {
-        ctx.reply("Afwan, terjadi kesalahan teknis.");
+        console.error("Error Detail:", e.message);
+        await ctx.reply("Afwan, video gagal diproses. Pastikan link publik dan durasi tidak terlalu panjang. 🙏");
     } finally {
-        // Auto-Cleanup Instan
         if (fs.existsSync(output)) fs.unlinkSync(output);
-        ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {});
+        if (status) ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {});
     }
 });
 
-bot.start();
-  
+// Menjalankan bot dengan pembersihan update tertunda
+bot.start({ drop_pending_updates: true });
+console.log("Bot berjalan... Alhamdulillah.");
