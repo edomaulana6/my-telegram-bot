@@ -1,18 +1,14 @@
 {
-  "name": "universal-downloader-ramadan",
-  "version": "2.1.0",
-  "description": "Bot All-Platform Downloader with 1080p Upscale",
+  "name": "ramadan-hd-bot",
+  "version": "1.0.0",
+  "description": "Bot Universal Downloader & Upscale Ramadan",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "telegraf": "^4.16.3",
-    "axios": "^1.7.9"
-  },
-  "engines": {
-    "node": ">=18.20.0"
-  },
-  "author": "Edo Maulana",
-  "license": "ISC"
+    "axios": "^1.6.0",
+    "telegraf": "^4.15.0",
+    "http": "^0.0.1-security"
+  }
 }
