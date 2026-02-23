@@ -1,12 +1,11 @@
 import os
 import asyncio
 from aiohttp import web
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import yt_dlp
 
-# --- Web Server Ringan (Health Check Koyeb) ---
-# Fungsi ini menjawab "tamu" dari Koyeb agar status bot menjadi Healthy
+# --- Web Server Health Check ---
 async def handle_health(request):
     return web.Response(text="Bot Aktif 100%", status=200)
 
@@ -15,90 +14,118 @@ async def start_web_server():
     app.router.add_get('/', handle_health)
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    # KUNCI MATI KE 8000 (Sesuai settingan dashboard kamu)
-    # Menggunakan 0.0.0.0 agar bisa diakses oleh sistem internal Koyeb
-    port = 8000 
-    
-    site = web.TCPSite(runner, '0.0.0.0', port)
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
-    print(f"✅ Web Server FIX running on port: {port}")
 
-# --- Logika Pengunduh (yt-dlp) ---
-def extract_and_download(url, opts):
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        return {'filename': ydl.prepare_filename(info)}
-
-# --- Handler Pesan Bot ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Kirimkan link Douyin/TikTok/YouTube untuk diunduh.")
-
-async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    chat_id = update.message.chat_id
-    
-    # Memberi tahu user bahwa proses sedang berjalan
-    status_msg = await update.message.reply_text("🔍 Sedang memproses link...")
-
-    # Konfigurasi yt-dlp yang stabil dan ringan
+# --- Fungsi Inti Download ---
+async def process_download(url, chat_id, context, is_audio_only=True):
+    # Gunakan restrictfilenames agar tidak ada karakter ilegal di sistem file
     ydl_opts = {
-        'format': 'best',
-        'outtmpl': f'video_{chat_id}.%(ext)s',
+        'outtmpl': f'downloads/%(title)s_{chat_id}.%(ext)s',
         'quiet': True,
         'no_warnings': True,
+        'restrictfilenames': True, 
     }
 
-    try:
-        # Menjalankan proses berat di thread berbeda agar bot tidak hang
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, lambda: extract_and_download(url, ydl_opts))
-        filename = info['filename']
+    if is_audio_only:
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+        })
+    else:
+        ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
 
-        await status_msg.edit_text("📤 Mengirim video...")
-        
-        # Mengirim file ke Telegram
-        with open(filename, 'rb') as video:
-            await context.bot.send_video(chat_id=chat_id, video=video)
-        
-        # Hapus file setelah terkirim agar storage Koyeb tidak penuh (Efisiensi 100%)
+    if not os.path.exists('downloads'):
+        os.makedirs('downloads')
+
+    try:
+        loop = asyncio.get_event_loop()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
+            filename = ydl.prepare_filename(info)
+            
+            if is_audio_only:
+                filename = os.path.splitext(filename)[0] + ".mp3"
+            
+            title = info.get('title', 'Media')
+            
+            with open(filename, 'rb') as f:
+                if is_audio_only:
+                    await context.bot.send_audio(chat_id=chat_id, audio=f, title=title)
+                else:
+                    await context.bot.send_video(chat_id=chat_id, video=f, caption=title)
+
+        # Hapus file segera setelah terkirim (Pembersihan Memory)
         if os.path.exists(filename):
             os.remove(filename)
-            
-        await status_msg.delete()
-
     except Exception as e:
-        await status_msg.edit_text(f"❌ Terjadi kesalahan: {str(e)}")
+        await context.bot.send_message(chat_id, f"❌ Gagal: {str(e)}")
+
+# --- Handler Pesan ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    chat_id = update.message.chat_id
+
+    if text.lower().startswith("play "):
+        query = text[5:].strip()
+        msg = await update.message.reply_text(f"📥 Mencari '{query}'...")
+        
+        # Default ke pencarian YouTube jika tidak spesifik
+        search_opts = {'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch1:', 'noplaylist': True}
+        try:
+            with yt_dlp.YoutubeDL(search_opts) as ydl:
+                info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(query, download=False))
+                if 'entries' in info and len(info['entries']) > 0:
+                    url = info['entries'][0]['webpage_url']
+                    await process_download(url, chat_id, context, is_audio_only=True)
+                    await msg.delete()
+                else:
+                    await msg.edit_text("❌ Lagu tidak ditemukan.")
+        except Exception as e:
+            await msg.edit_text(f"❌ Error: {str(e)}")
+
+    elif "http" in text:
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🎵 MP3", callback_data=f"dl_mp3|{text}"),
+                InlineKeyboardButton("🎬 MP4", callback_data=f"dl_mp4|{text}")
+            ]
+        ])
+        await update.message.reply_text("Pilih format unduhan:", reply_markup=keyboard)
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    data_parts = query.data.split('|')
+    action = data_parts[0]
+    url = data_parts[1]
+    
+    is_audio = (action == "dl_mp3")
+    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Sedang mengunduh...")
+    await process_download(url, query.message.chat_id, context, is_audio_only=is_audio)
+    await status_msg.delete()
 
 # --- Fungsi Utama ---
 async def main():
-    # Mengambil token dari Environment Variables
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
-        print("Error: Variabel TELEGRAM_TOKEN belum diatur di Koyeb!")
+        print("❌ ERROR: TELEGRAM_TOKEN tidak ditemukan di Environment Variables!")
         return
 
-    # Inisialisasi Bot dengan library terbaru (v20.x)
     application = Application.builder().token(token).build()
+    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Kirim link atau ketik 'play [judul]'")))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_callback))
 
-    # Menambahkan perintah bot
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
-
-    # 1. Jalankan Web Server DULU agar Koyeb melihat bot "Healthy"
     await start_web_server()
     
-    # 2. Jalankan Bot Polling
     async with application:
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
-        # Menjaga script agar tidak berhenti
         await asyncio.Event().wait()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    asyncio.run(main())
     
