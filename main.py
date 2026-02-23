@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import yt_dlp
 
-# --- Web Server Health Check ---
+# --- Web Server Health Check (Untuk Koyeb/Heroku) ---
 async def handle_health(request):
     return web.Response(text="Bot Aktif 100%", status=200)
 
@@ -19,12 +19,15 @@ async def start_web_server():
 
 # --- Fungsi Inti Download ---
 async def process_download(url, chat_id, context, is_audio_only=True):
-    # Gunakan restrictfilenames agar tidak ada karakter ilegal di sistem file
+    # Buat folder jika belum ada agar tidak error
+    if not os.path.exists('downloads'):
+        os.makedirs('downloads')
+
     ydl_opts = {
         'outtmpl': f'downloads/%(title)s_{chat_id}.%(ext)s',
         'quiet': True,
         'no_warnings': True,
-        'restrictfilenames': True, 
+        'restrictfilenames': True, # Menghindari karakter ilegal pada nama file
     }
 
     if is_audio_only:
@@ -33,10 +36,8 @@ async def process_download(url, chat_id, context, is_audio_only=True):
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
     else:
-        ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
-
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
+        # Filter agar video tidak melebihi limit Telegram (50MB)
+        ydl_opts.update({'format': 'best[ext=mp4][filesize<50M]/best[ext=mp4]/best'})
 
     try:
         loop = asyncio.get_event_loop()
@@ -55,23 +56,24 @@ async def process_download(url, chat_id, context, is_audio_only=True):
                 else:
                     await context.bot.send_video(chat_id=chat_id, video=f, caption=title)
 
-        # Hapus file segera setelah terkirim (Pembersihan Memory)
+        # Pembersihan file (Wajib untuk efisiensi storage server)
         if os.path.exists(filename):
             os.remove(filename)
     except Exception as e:
-        await context.bot.send_message(chat_id, f"❌ Gagal: {str(e)}")
+        await context.bot.send_message(chat_id, f"❌ Gagal memproses: {str(e)}")
 
 # --- Handler Pesan ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.message.chat_id
 
+    # FITUR CARI MUSIK - Dialihkan ke SoundCloud (scsearch) agar tidak kena bot check YouTube
     if text.lower().startswith("play "):
         query = text[5:].strip()
-        msg = await update.message.reply_text(f"📥 Mencari '{query}'...")
+        msg = await update.message.reply_text(f"📥 Mencari '{query}' di SoundCloud...")
         
-        # Default ke pencarian YouTube jika tidak spesifik
-        search_opts = {'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch1:', 'noplaylist': True}
+        # Menggunakan scsearch agar stabil di server cloud
+        search_opts = {'format': 'bestaudio/best', 'quiet': True, 'default_search': 'scsearch1:', 'noplaylist': True}
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(query, download=False))
@@ -80,18 +82,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await process_download(url, chat_id, context, is_audio_only=True)
                     await msg.delete()
                 else:
-                    await msg.edit_text("❌ Lagu tidak ditemukan.")
+                    await msg.edit_text(f"❌ '{query}' tidak ditemukan di SoundCloud.")
         except Exception as e:
-            await msg.edit_text(f"❌ Error: {str(e)}")
+            await msg.edit_text(f"❌ Error Pencarian: {str(e)}")
 
+    # FITUR KIRIM LINK
     elif "http" in text:
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🎵 MP3", callback_data=f"dl_mp3|{text}"),
-                InlineKeyboardButton("🎬 MP4", callback_data=f"dl_mp4|{text}")
+                InlineKeyboardButton("🎵 MP3 (Audio)", callback_data=f"dl_mp3|{text}"),
+                InlineKeyboardButton("🎬 MP4 (Video)", callback_data=f"dl_mp4|{text}")
             ]
         ])
-        await update.message.reply_text("Pilih format unduhan:", reply_markup=keyboard)
+        await update.message.reply_text("Pilih format media:", reply_markup=keyboard)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -102,7 +105,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = data_parts[1]
     
     is_audio = (action == "dl_mp3")
-    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Sedang mengunduh...")
+    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Memulai unduhan...")
     await process_download(url, query.message.chat_id, context, is_audio_only=is_audio)
     await status_msg.delete()
 
@@ -110,11 +113,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
-        print("❌ ERROR: TELEGRAM_TOKEN tidak ditemukan di Environment Variables!")
+        print("❌ ERROR: TELEGRAM_TOKEN tidak ditemukan!")
         return
 
     application = Application.builder().token(token).build()
-    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Kirim link atau ketik 'play [judul]'")))
+    
+    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Kirim link atau ketik 'play [judul]' untuk SoundCloud.")))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
 
@@ -128,4 +132,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-    
