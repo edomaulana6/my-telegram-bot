@@ -1,21 +1,27 @@
+# Gunakan image Python yang ringan
 FROM python:3.10-slim
 
-# Instalasi ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Instal FFmpeg dan dependencies sistem
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set direktori kerja secara absolut
+# Set direktori kerja di dalam kontainer
 WORKDIR /app
 
-# Salin requirements dan instalasi
+# Salin requirements dan instal library Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Salin semua isi repo ke /app
+# Salin seluruh kode bot ke dalam kontainer
 COPY . .
 
-# Tambahkan perintah 'ls' di log untuk debugging (Opsional)
-# RUN ls -la /app
+# Buat folder downloads agar aplikasi tidak error saat menulis file
+RUN mkdir -p downloads && chmod 777 downloads
 
-# Gunakan jalur absolut pada CMD
-CMD ["python", "/app/bot.py"]
-    
+# Ekspos port 8000 untuk Health Check (Koyeb)
+EXPOSE 8000
+
+# Jalankan bot
+CMD ["python", "main.py"]
