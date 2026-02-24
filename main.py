@@ -6,44 +6,27 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import yt_dlp
 
-# --- KONFIGURASI ---
-INVIDIOUS_INSTANCE = "https://yewtu.be"
-
-# --- WEB SERVER HEALTH CHECK ---
+# --- KONFIGURASI WEB SERVER (KOYEB COMPLIANT) ---
 async def handle_health(request):
-    return web.Response(text="Bot Aktif 100%", status=200)
+    return web.Response(text="Bot Status: 100% Aktif", status=200)
 
 async def start_web_server():
     app = web.Application()
     app.router.add_get('/', handle_health)
     runner = web.AppRunner(app)
     await runner.setup()
-    # Port 8000 untuk kesesuaian dengan Cloud Hosting (Koyeb/Heroku)
-    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    # Koyeb memberikan PORT secara dinamis melalui environment variable
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    print(f"Web Server running on port {port}")
 
-# --- LOGIKA PENYESUAIAN URL ---
-def get_safe_url(url):
-    """Konversi YouTube ke Invidious (Tanpa Cookies). Platform lain tetap."""
-    if "youtube.com" in url or "youtu.be" in url:
-        video_id = ""
-        if "watch?v=" in url:
-            video_id = url.split("watch?v=")[1].split("&")[0]
-        elif "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0]
-        
-        if video_id:
-            return f"{INVIDIOUS_INSTANCE}/watch?v={video_id}"
-    return url
-
-# --- LOGIKA UNDUHAN ---
+# --- LOGIKA UNDUHAN UTAMA ---
 async def process_download(url, chat_id, context, is_audio_only=True):
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
-    final_url = get_safe_url(url)
-    
-    # ID Unik agar file antar user tidak tertukar
+    # ID unik untuk menghindari tabrakan file antar user
     file_id = f"{chat_id}_{int(asyncio.get_event_loop().time())}"
     
     ydl_opts = {
@@ -55,7 +38,7 @@ async def process_download(url, chat_id, context, is_audio_only=True):
     }
 
     if is_audio_only:
-        # Format M4A: Cepat, Ringan, Bisa Disimpan (Saveable)
+        # Optimasi M4A (AAC) agar ringan dan bisa di-Save ke Library Musik
         ydl_opts.update({
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'postprocessors': [{
@@ -70,103 +53,106 @@ async def process_download(url, chat_id, context, is_audio_only=True):
     try:
         loop = asyncio.get_event_loop()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(final_url, download=True))
+            # Mengunduh file
+            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
             original_file = ydl.prepare_filename(info)
             
-            # Koreksi ekstensi jika menggunakan postprocessor
-            if is_audio_only:
-                filename = os.path.splitext(original_file)[0] + ".m4a"
-            else:
-                filename = original_file
-            
+            # Koreksi nama file jika format audio diubah oleh postprocessor
+            filename = os.path.splitext(original_file)[0] + ".m4a" if is_audio_only else original_file
             title = info.get('title', 'Media')
 
             if os.path.exists(filename):
                 with open(filename, 'rb') as f:
                     if is_audio_only:
                         await context.bot.send_audio(
-                            chat_id=chat_id,
-                            audio=f,
-                            title=title,
-                            performer="Downloader Bot",
+                            chat_id=chat_id, 
+                            audio=f, 
+                            title=title, 
+                            performer="Music Downloader",
                             filename=f"{title}.m4a"
                         )
                     else:
-                        await context.bot.send_video(
-                            chat_id=chat_id,
-                            video=f,
-                            caption=title
-                        )
+                        await context.bot.send_video(chat_id=chat_id, video=f, caption=title)
+                # Pembersihan storage otomatis
                 os.remove(filename)
             else:
-                raise FileNotFoundError("File tidak ditemukan setelah unduhan.")
-                
-    except Exception as e:
-        await context.bot.send_message(chat_id, f"❌ Gagal: {str(e)}")
+                raise FileNotFoundError("Gagal membuat file M4A. Pastikan FFmpeg terinstall.")
 
-# --- PENANGANAN PESAN ---
+    except Exception as e:
+        await context.bot.send_message(chat_id, f"❌ Kesalahan: {str(e)}")
+
+# --- PENANGANAN PESAN MASUK ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.message.chat_id
 
-    # Fitur PLAY (YouTube via Invidious)
+    # --- FITUR PLAY: SOUNDCLOUD ---
     if text.lower().startswith("play "):
         query = text[5:].strip()
-        msg = await update.message.reply_text(f"🔍 Mencari '{query}'...")
+        msg = await update.message.reply_text(f"🔍 Mencari '{query}' di SoundCloud...")
         
-        search_opts = {'quiet': True, 'noplaylist': True, 'extract_flat': True, 'default_search': 'ytsearch1'}
+        search_opts = {
+            'format': 'bestaudio/best', 
+            'quiet': True, 
+            'default_search': 'scsearch1:', 
+            'noplaylist': True
+        }
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(query, download=False))
                 if 'entries' in info and len(info['entries']) > 0:
-                    video_url = info['entries'][0]['url']
-                    await process_download(video_url, chat_id, context, is_audio_only=True)
+                    url = info['entries'][0]['url']
+                    await process_download(url, chat_id, context, is_audio_only=True)
                     await msg.delete()
                 else:
-                    await msg.edit_text("❌ Tidak ditemukan.")
+                    await msg.edit_text(f"❌ '{query}' tidak ditemukan.")
         except Exception as e:
-            await msg.edit_text(f"❌ Error: {str(e)}")
+            await msg.edit_text(f"❌ SoundCloud Error: {str(e)}")
 
-    # Deteksi Link (Semua Platform)
+    # --- DETEKSI LINK (SEMUA PLATFORM) ---
     elif "http" in text:
-        url = re.search(r'(https?://[^\s]+)', text).group(0)
-        # Simpan URL di context user karena callback_data punya limit karakter
-        context.user_data['last_url'] = url
-        
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎵 Audio (M4A)", callback_data="dl_m4a"),
-             InlineKeyboardButton("🎬 Video (MP4)", callback_data="dl_mp4")]
-        ])
-        await update.message.reply_text("Pilih format media:", reply_markup=keyboard)
+        url_match = re.search(r'(https?://[^\s]+)', text)
+        if url_match:
+            url = url_match.group(0)
+            # Simpan URL di memori bot agar callback data tidak terlalu panjang
+            context.user_data['last_url'] = url
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎵 Audio (M4A)", callback_data="dl_m4a"),
+                 InlineKeyboardButton("🎬 Video (MP4)", callback_data="dl_mp4")]
+            ])
+            await update.message.reply_text("Pilih format unduhan:", reply_markup=keyboard)
 
-# --- CALLBACK ---
+# --- CALLBACK TOMBOL ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     url = context.user_data.get('last_url')
     if not url:
-        await query.message.edit_text("❌ Link kadaluwarsa. Silakan kirim ulang.")
+        await query.message.edit_text("❌ Link sudah kadaluwarsa, kirim ulang linknya.")
         return
 
     is_audio = (query.data == "dl_m4a")
-    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Memproses sumber...")
+    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Sedang memproses file...")
     await process_download(url, query.message.chat_id, context, is_audio_only=is_audio)
     await status_msg.delete()
 
-# --- MAIN ---
+# --- MAIN EXECUTION ---
 async def main():
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
-        print("❌ TELEGRAM_TOKEN TIDAK DITEMUKAN!")
+        print("❌ CRITICAL ERROR: Variabel TELEGRAM_TOKEN tidak ditemukan!")
         return
 
     application = Application.builder().token(token).build()
     
-    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("👋 Bot Aktif! Gunakan 'play [judul]' atau kirim link.")))
+    # Register Handlers
+    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("👋 Bot Aktif!\nKetik 'play [judul]' atau kirim link.")))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
 
+    # Start Web Server & Polling
     await start_web_server()
     async with application:
         await application.initialize()
