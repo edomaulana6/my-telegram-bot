@@ -1,168 +1,119 @@
 import os
 import asyncio
 import re
-from aiohttp import web
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import yt_dlp
+from aiohttp import web
 
-# --- KONFIGURASI WEB SERVER (KOYEB COMPLIANT) ---
-async def handle_health(request):
-    return web.Response(text="Bot Status: 100% Aktif", status=200)
+# --- KONFIGURASI TAMPILAN (FRONTEND) ---
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Downloader Pro | vps-eropa.duckdns.org</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
+        .container { max-width: 600px; margin: auto; background: #1e1e1e; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h1 { color: #0088cc; }
+        input[type="text"] { width: 90%; padding: 12px; margin: 15px 0; border-radius: 8px; border: 1px solid #333; background: #252525; color: #fff; }
+        .btn-group { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        button { padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-audio { background: #0088cc; color: white; }
+        .btn-video { background: #f44336; color: white; }
+        .btn-search { background: #ff5500; color: white; width: 95%; margin-top: 10px; }
+        button:hover { opacity: 0.8; transform: scale(1.02); }
+        .footer { margin-top: 20px; font-size: 11px; color: #666; }
+        .info { font-size: 13px; color: #aaa; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 All-in-One Downloader</h1>
+        <p class="info">Mendukung YouTube, TikTok, IG, FB, dan SoundCloud</p>
+        
+        <form action="/download" method="get">
+            <input type="text" name="q" placeholder="Tempel Link atau Judul Lagu (SoundCloud)..." required>
+            <div class="btn-group">
+                <button type="submit" name="type" value="audio" class="btn-audio">🎵 Audio (M4A)</button>
+                <button type="submit" name="type" value="video" class="btn-video">🎬 Video (MP4)</button>
+            </div>
+            <button type="submit" name="type" value="sc" class="btn-search">☁️ Search & Play SoundCloud</button>
+        </form>
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    # Koyeb memberikan PORT secara dinamis melalui environment variable
-    port = int(os.environ.get("PORT", 8000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Web Server running on port {port}")
+        <div class="footer">
+            Server: vps-eropa.duckdns.org <br>
+            Batas Deaktivasi Sistem: 30 Maret 2026
+        </div>
+    </div>
+</body>
+</html>
+"""
 
-# --- LOGIKA UNDUHAN UTAMA ---
-async def process_download(url, chat_id, context, is_audio_only=True):
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
+# --- LOGIKA PEMROSESAN (BACKEND) ---
+async def handle_home(request):
+    return web.Response(text=HTML_PAGE, content_type='text/html')
 
-    # ID unik untuk menghindari tabrakan file antar user
-    file_id = f"{chat_id}_{int(asyncio.get_event_loop().time())}"
+async def handle_download(request):
+    query = request.query.get('q')
+    mode = request.query.get('type')
     
+    if not query:
+        return web.Response(text="Input tidak boleh kosong!", status=400)
+
+    # Penyesuaian Opsi YT-DLP (Sama dengan script bot lama Anda)
     ydl_opts = {
-        'outtmpl': f'downloads/%(title)s_{file_id}.%(ext)s',
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
 
-    if is_audio_only:
-        # Optimasi M4A (AAC) agar ringan dan bisa di-Save ke Library Musik
+    if mode == "audio" or mode == "sc":
+        # Fitur Play SoundCloud & Audio M4A
+        search_prefix = "scsearch1:" if mode == "sc" else ""
         ydl_opts.update({
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }],
+            'default_search': search_prefix,
+            'noplaylist': True
         })
     else:
-        # Video MP4 Max 480p agar masuk limit 50MB Telegram
-        ydl_opts.update({'format': 'best[ext=mp4][height<=480][filesize<50M]/best[ext=mp4]/best'})
+        # Fitur Video Max 480p (Sesuai script lama Anda)
+        ydl_opts.update({'format': 'best[ext=mp4][height<=480]'})
 
     try:
-        loop = asyncio.get_event_loop()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Mengunduh file
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
-            original_file = ydl.prepare_filename(info)
+            loop = asyncio.get_event_loop()
+            info = await loop.run_in_executor(None, lambda: ydl.extract_info(query, download=False))
             
-            # Koreksi nama file jika format audio diubah oleh postprocessor
-            filename = os.path.splitext(original_file)[0] + ".m4a" if is_audio_only else original_file
-            title = info.get('title', 'Media')
+            # Jika hasil adalah pencarian SoundCloud, ambil entri pertama
+            if 'entries' in info:
+                info = info['entries'][0]
+            
+            download_url = info.get('url')
+            if not download_url:
+                return web.Response(text="Gagal mendapatkan link unduhan.")
 
-            if os.path.exists(filename):
-                with open(filename, 'rb') as f:
-                    if is_audio_only:
-                        await context.bot.send_audio(
-                            chat_id=chat_id, 
-                            audio=f, 
-                            title=title, 
-                            performer="Music Downloader",
-                            filename=f"{title}.m4a"
-                        )
-                    else:
-                        await context.bot.send_video(chat_id=chat_id, video=f, caption=title)
-                # Pembersihan storage otomatis
-                os.remove(filename)
-            else:
-                raise FileNotFoundError("Gagal membuat file M4A. Pastikan FFmpeg terinstall.")
+            # Redirect user langsung ke stream file agar tidak membebani storage Koyeb
+            return web.HTTPFound(location=download_url)
 
     except Exception as e:
-        await context.bot.send_message(chat_id, f"❌ Kesalahan: {str(e)}")
+        return web.Response(text=f"Kesalahan: {str(e)}", status=500)
 
-# --- PENANGANAN PESAN MASUK ---
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    chat_id = update.message.chat_id
-
-    # --- FITUR PLAY: SOUNDCLOUD ---
-    if text.lower().startswith("play "):
-        query = text[5:].strip()
-        msg = await update.message.reply_text(f"🔍 Mencari '{query}' di SoundCloud...")
-        
-        search_opts = {
-            'format': 'bestaudio/best', 
-            'quiet': True, 
-            'default_search': 'scsearch1:', 
-            'noplaylist': True
-        }
-        try:
-            with yt_dlp.YoutubeDL(search_opts) as ydl:
-                info = await asyncio.get_event_loop().run_in_executor(None, lambda: ydl.extract_info(query, download=False))
-                if 'entries' in info and len(info['entries']) > 0:
-                    url = info['entries'][0]['url']
-                    await process_download(url, chat_id, context, is_audio_only=True)
-                    await msg.delete()
-                else:
-                    await msg.edit_text(f"❌ '{query}' tidak ditemukan.")
-        except Exception as e:
-            await msg.edit_text(f"❌ SoundCloud Error: {str(e)}")
-
-    # --- DETEKSI LINK (SEMUA PLATFORM) ---
-    elif "http" in text:
-        url_match = re.search(r'(https?://[^\s]+)', text)
-        if url_match:
-            url = url_match.group(0)
-            # Simpan URL di memori bot agar callback data tidak terlalu panjang
-            context.user_data['last_url'] = url
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎵 Audio (M4A)", callback_data="dl_m4a"),
-                 InlineKeyboardButton("🎬 Video (MP4)", callback_data="dl_mp4")]
-            ])
-            await update.message.reply_text("Pilih format unduhan:", reply_markup=keyboard)
-
-# --- CALLBACK TOMBOL ---
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    url = context.user_data.get('last_url')
-    if not url:
-        await query.message.edit_text("❌ Link sudah kadaluwarsa, kirim ulang linknya.")
-        return
-
-    is_audio = (query.data == "dl_m4a")
-    status_msg = await context.bot.send_message(query.message.chat_id, "⏳ Sedang memproses file...")
-    await process_download(url, query.message.chat_id, context, is_audio_only=is_audio)
-    await status_msg.delete()
-
-# --- MAIN EXECUTION ---
+# --- KONFIGURASI SERVER ---
 async def main():
-    token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        print("❌ CRITICAL ERROR: Variabel TELEGRAM_TOKEN tidak ditemukan!")
-        return
-
-    application = Application.builder().token(token).build()
+    app = web.Application()
+    app.router.add_get('/', handle_home)
+    app.router.add_get('/download', handle_download)
     
-    # Register Handlers
-    application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("👋 Bot Aktif!\nKetik 'play [judul]' atau kirim link.")))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(button_callback))
-
-    # Start Web Server & Polling
-    await start_web_server()
-    async with application:
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-        await asyncio.Event().wait()
+    port = int(os.environ.get("PORT", 8000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Website aktif di port {port}")
+    await asyncio.Event().wait()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    asyncio.run(main())
     
